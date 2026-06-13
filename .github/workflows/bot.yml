@@ -2,30 +2,38 @@ name: Football News Bot
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
-
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v5
+    permissions:
+      contents: write
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
-      - name: Install Dependencies
-        run: |
-          pip install -r requirements.txt
+      - run: pip install -r requirements.txt
 
       - name: Run Bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python main.py
+
+      - name: Commit Updated File
         run: |
-          python main.py
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+
+          git add posted_articles.txt
+
+          git diff --staged --quiet || git commit -m "Update posted articles"
+
+          git push
