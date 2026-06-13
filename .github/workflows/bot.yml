@@ -13,19 +13,24 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout Repository
+        uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v6
+      - name: Setup Python
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
-      - run: pip install -r requirements.txt
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
 
       - name: Run Bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python main.py
+        run: |
+          python main.py
 
       - name: Commit Updated File
         run: |
@@ -34,6 +39,8 @@ jobs:
 
           git add posted_articles.txt
 
-          git diff --staged --quiet || git commit -m "Update posted articles"
-
-          git push
+          if ! git diff --staged --quiet; then
+            git commit -m "Update posted articles"
+            git pull --rebase origin main || true
+            git push origin HEAD:main
+          fi
