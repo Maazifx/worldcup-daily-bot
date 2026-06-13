@@ -7,11 +7,10 @@ CHAT_ID = os.environ["CHAT_ID"]
 POSTED_FILE = "posted_matches.txt"
 
 if not os.path.exists(POSTED_FILE):
-    with open(POSTED_FILE, "w", encoding="utf-8"):
-        pass
+    open(POSTED_FILE, "w").close()
 
 with open(POSTED_FILE, "r", encoding="utf-8") as f:
-    posted_updates = set(
+    posted = set(
         line.strip()
         for line in f
         if line.strip()
@@ -20,16 +19,9 @@ with open(POSTED_FILE, "r", encoding="utf-8") as f:
 url = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard"
 
 response = requests.get(url)
-
 data = response.json()
 
 events = data.get("events", [])
-
-if not events:
-    print("No World Cup matches found.")
-    exit()
-
-new_updates = []
 
 for event in events:
 
@@ -43,57 +35,41 @@ for event in events:
 
     status = competition["status"]["type"]["description"]
 
-    update_key = (
-        f"{home}|{away}|"
-        f"{home_score}|{away_score}|"
-        f"{status}"
-    )
+    match_id = event["id"]
 
-    if update_key not in posted_updates:
+    # FULL TIME ALERT
+    if status.lower() == "final":
 
-        new_updates.append({
-            "home": home,
-            "away": away,
-            "home_score": home_score,
-            "away_score": away_score,
-            "status": status,
-            "key": update_key
-        })
+        alert_key = f"FT-{match_id}"
 
-        posted_updates.add(update_key)
+        if alert_key not in posted:
 
-if not new_updates:
-    print("No new match updates.")
+            message = f"""
+🏁 FULL TIME
 
-else:
+{home} {home_score}-{away_score} {away}
 
-    for match in new_updates:
-
-        message = f"""
-⚽ WORLD CUP UPDATE
-
-{match['home']} {match['home_score']} - {match['away_score']} {match['away']}
-
-⏱ {match['status']}
+🌎 FIFA WORLD CUP 2026
 """
 
-        telegram_url = (
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        )
+            telegram_url = (
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            )
 
-        response = requests.post(
-            telegram_url,
-            data={
-                "chat_id": CHAT_ID,
-                "text": message
-            }
-        )
+            telegram_response = requests.post(
+                telegram_url,
+                data={
+                    "chat_id": CHAT_ID,
+                    "text": message
+                }
+            )
 
-        print(response.status_code)
+            print(telegram_response.status_code)
 
-    with open(POSTED_FILE, "w", encoding="utf-8") as f:
+            posted.add(alert_key)
 
-        for update in posted_updates:
-            f.write(update + "\n")
+with open(POSTED_FILE, "w", encoding="utf-8") as f:
+    for item in posted:
+        f.write(item + "\n")
 
-    print(f"Posted {len(new_updates)} new updates.")
+print("Finished checking matches.")
