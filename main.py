@@ -13,12 +13,10 @@ FEEDS = {
     "90Min": "https://www.90min.com/posts.rss"
 }
 
-# Create file if it doesn't exist
 if not os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "w", encoding="utf-8"):
         pass
 
-# Read previously posted links
 with open(POSTED_FILE, "r", encoding="utf-8") as f:
     posted_links = set(
         line.strip()
@@ -28,7 +26,6 @@ with open(POSTED_FILE, "r", encoding="utf-8") as f:
 
 new_posts = []
 
-# Scan all feeds
 for source, url in FEEDS.items():
 
     feed = feedparser.parse(url)
@@ -46,24 +43,37 @@ for source, url in FEEDS.items():
 
         if link not in posted_links:
 
+            image_url = None
+
+            if "media_content" in article:
+                try:
+                    image_url = article.media_content[0]["url"]
+                except:
+                    pass
+
+            if not image_url and "media_thumbnail" in article:
+                try:
+                    image_url = article.media_thumbnail[0]["url"]
+                except:
+                    pass
+
             new_posts.append({
                 "source": source,
                 "title": title,
-                "link": link
+                "link": link,
+                "image": image_url
             })
 
             posted_links.add(link)
 
-# Nothing new
 if not new_posts:
     print("No new articles found.")
 
-# Send new articles
 else:
 
     for post in new_posts:
 
-        message = f"""
+        caption = f"""
 🚨 BREAKING NEWS
 
 📰 {post['title']}
@@ -73,18 +83,30 @@ else:
 🔗 {post['link']}
 """
 
-        response = requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={
-                "chat_id": CHAT_ID,
-                "text": message
-            }
-        )
+        if post["image"]:
+
+            response = requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+                data={
+                    "chat_id": CHAT_ID,
+                    "photo": post["image"],
+                    "caption": caption[:1024]
+                }
+            )
+
+        else:
+
+            response = requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                data={
+                    "chat_id": CHAT_ID,
+                    "text": caption
+                }
+            )
 
         print(response.status_code)
         print(response.text)
 
-    # Save updated links
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
         for link in posted_links:
             f.write(link + "\n")
