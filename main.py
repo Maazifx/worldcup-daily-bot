@@ -1,9 +1,12 @@
 import feedparser
 import requests
+import os
 
-BOT_TOKEN = "8805510514:AAGIgIviJztRvh0iEXCRAQH-L8NtROciG2s"
-CHAT_ID = "@wcupdates2026"
+# Read secrets from GitHub
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+CHAT_ID = os.environ["CHAT_ID"]
 
+# BBC Football RSS
 feed = feedparser.parse(
     "https://feeds.bbci.co.uk/sport/football/rss.xml"
 )
@@ -11,9 +14,11 @@ feed = feedparser.parse(
 latest = feed.entries[0]
 
 message = f"""
-🚨 {latest.title}
+🚨 BREAKING NEWS
 
-{latest.link}
+📰 {latest.title}
+
+🔗 {latest.link}
 """
 
 response = requests.post(
