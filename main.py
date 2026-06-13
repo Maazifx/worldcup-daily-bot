@@ -7,21 +7,19 @@ CHAT_ID = os.environ["CHAT_ID"]
 
 POSTED_FILE = "posted_articles.txt"
 
+if not os.path.exists(POSTED_FILE):
+    open(POSTED_FILE, "w").close()
+
+with open(POSTED_FILE, "r", encoding="utf-8") as f:
+    posted_links = set(line.strip() for line in f)
+
 feed = feedparser.parse(
     "https://feeds.bbci.co.uk/sport/football/rss.xml"
 )
 
 latest = feed.entries[0]
 
-article_link = latest.link
-
-posted = set()
-
-if os.path.exists(POSTED_FILE):
-    with open(POSTED_FILE, "r", encoding="utf-8") as f:
-        posted = set(line.strip() for line in f)
-
-if article_link not in posted:
+if latest.link not in posted_links:
 
     message = f"""
 🚨 BREAKING NEWS
@@ -39,11 +37,10 @@ if article_link not in posted:
         }
     )
 
-    print(response.status_code)
     print(response.text)
 
     with open(POSTED_FILE, "a", encoding="utf-8") as f:
-        f.write(article_link + "\n")
+        f.write(latest.link + "\n")
 
 else:
-    print("Article already posted.")
+    print("Already posted.")
