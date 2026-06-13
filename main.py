@@ -2,7 +2,7 @@ import feedparser
 import requests
 
 BOT_TOKEN = "8805510514:AAGIgIviJztRvh0iEXCRAQH-L8NtROciG2s"
-CHAT_ID = "wcupdates2026"
+CHAT_ID = "@wcupdates2026"
 
 feed = feedparser.parse(
     "https://feeds.bbci.co.uk/sport/football/rss.xml"
@@ -16,7 +16,7 @@ message = f"""
 {latest.link}
 """
 
-requests.post(
+response = requests.post(
     f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
     data={
         "chat_id": CHAT_ID,
@@ -24,4 +24,5 @@ requests.post(
     }
 )
 
-print("News sent")
+print(response.status_code)
+print(response.text)
