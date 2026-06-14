@@ -1,6 +1,7 @@
+```python
 import requests
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
@@ -51,7 +52,9 @@ if events:
                 match_date.replace("Z", "+00:00")
             )
 
-            time_string = dt.strftime("%H:%M UTC")
+            wat_time = dt + timedelta(hours=1)
+
+            time_string = wat_time.strftime("%H:%M WAT")
 
         except:
             time_string = "TBA"
@@ -62,14 +65,22 @@ if events:
         )
 
 message += (
-    "🔥 STORY TO WATCH\n\n"
-    "Follow the latest World Cup developments, "
-    "team news, and matchday drama throughout the day.\n\n"
+    "🔥 MATCHDAY OUTLOOK\n\n"
+    "Today's fixtures could have a major impact on the group standings. "
+    "Watch for potential qualification scenarios, surprise results, "
+    "and standout individual performances.\n\n"
 )
 
 message += (
-    "🏆 FIFA WORLD CUP 2026\n"
-    "Stay tuned for fixtures, results, and breaking news."
+    "📢 WHAT TO EXPECT TODAY\n\n"
+    "• Match updates\n"
+    "• Full-time results\n"
+    "• World Cup news\n"
+    "• Daily fixtures\n\n"
+)
+
+message += (
+    "🏆 FIFA WORLD CUP 2026"
 )
 
 telegram_url = (
@@ -88,3 +99,6 @@ print(telegram_response.status_code)
 
 with open(STATE_FILE, "w", encoding="utf-8") as f:
     f.write(today)
+
+print("Briefing posted.")
+```
