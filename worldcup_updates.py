@@ -259,7 +259,7 @@ posts_sent = 0
 
 for post in new_posts:
 
-if posts_sent >= 3:
+    if posts_sent >= 3:
     break
 
 image_file = get_best_image(
