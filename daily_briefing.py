@@ -1,4 +1,3 @@
-```python
 import requests
 import os
 from datetime import datetime, timedelta
@@ -101,4 +100,3 @@ with open(STATE_FILE, "w", encoding="utf-8") as f:
     f.write(today)
 
 print("Briefing posted.")
-```
