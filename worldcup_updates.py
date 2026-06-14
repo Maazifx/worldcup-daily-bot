@@ -4,6 +4,9 @@ import os
 import re
 import time
 
+from io import BytesIO
+from PIL import Image
+
 from graphics import create_graphic
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
@@ -45,10 +48,8 @@ WORLD_CUP_KEYWORDS = [
     "semifinal",
     "final",
     "knockout",
-    "international football",
+    "international",
     "national team",
-    "soccer",
-    "football",
     "argentina",
     "brazil",
     "england",
@@ -95,12 +96,44 @@ BANNED_WORDS = [
     "podcast",
     "football daily",
     "audio",
-    "transfer rumours",
-    "fantasy football",
     "betting",
-    "odds",
-    "prediction"
+    "odds"
 ]
+
+def get_best_image(image_url):
+
+    try:
+
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+
+        response = requests.get(
+            image_url,
+            headers=headers,
+            timeout=20
+        )
+
+        if response.status_code != 200:
+            return None
+
+        image = Image.open(
+            BytesIO(response.content)
+        )
+
+        width, height = image.size
+
+        if width < 600:
+            return None
+
+        with open("article.jpg", "wb") as f:
+            f.write(response.content)
+
+        return "article.jpg"
+
+    except Exception:
+        return None
+
 
 if not os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "w", encoding="utf-8"):
@@ -117,18 +150,16 @@ new_posts = []
 
 for source in SOURCE_PRIORITY:
 
-    url = FEEDS[source]
-
-    feed = feedparser.parse(url)
+    feed = feedparser.parse(FEEDS[source])
 
     if not hasattr(feed, "entries"):
         continue
 
-    source_post_count = 0
+    source_count = 0
 
     for article in feed.entries[:25]:
 
-        if source_post_count >= 2:
+        if source_count >= 2:
             break
 
         title = getattr(article, "title", "").strip()
@@ -138,7 +169,7 @@ for source in SOURCE_PRIORITY:
         if not title or not link:
             continue
 
-        if "sounds/play" in link:
+        if link in posted_articles:
             continue
 
         clean_summary = re.sub(
@@ -154,21 +185,15 @@ for source in SOURCE_PRIORITY:
         )
 
         if any(
-            word in article_text
-            for word in BANNED_WORDS
+            banned in article_text
+            for banned in BANNED_WORDS
         ):
             continue
 
         if not any(
-            keyword.lower() in article_text
+            keyword in article_text
             for keyword in WORLD_CUP_KEYWORDS
         ):
-            continue
-
-        article_key = link
-
-        if article_key in posted_articles:
-            print(f"Skipping duplicate: {title}")
             continue
 
         image_url = None
@@ -189,7 +214,6 @@ for source in SOURCE_PRIORITY:
             continue
 
         new_posts.append({
-            "key": article_key,
             "source": source,
             "title": title,
             "summary": clean_summary[:350],
@@ -197,44 +221,41 @@ for source in SOURCE_PRIORITY:
             "image": image_url
         })
 
-        posted_articles.add(article_key)
-        source_post_count += 1
+        posted_articles.add(link)
+
+        source_count += 1
 
 if not new_posts:
     print("No World Cup news found.")
-    exit()
+    raise SystemExit
 
-for post in new_posts[:3]:
+posts_sent = 0
 
-    caption = (
-        f"🚨 BREAKING\n\n"
-        f"📰 {post['title']}\n\n"
-        f"{post['summary']}\n\n"
-        f"🏆 Source: {post['source']}\n"
-        f"📲 @wcupdates2026"
+for post in new_posts:
+
+    if posts_sent >= 3:
+        break
+
+    image_file = get_best_image(
+        post["image"]
     )
+
+    if not image_file:
+        continue
 
     try:
 
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
-
-        image_response = requests.get(
-            post["image"],
-            headers=headers,
-            timeout=20
+        graphic_file = create_graphic(
+            image_file,
+            post["title"]
         )
 
-        if image_response.status_code != 200:
-            continue
-
-        with open("article.jpg", "wb") as img:
-            img.write(image_response.content)
-
-        graphic_file = create_graphic(
-            "article.jpg",
-            post["title"]
+        caption = (
+            f"🚨 BREAKING\n\n"
+            f"{post['title']}\n\n"
+            f"{post['summary']}\n\n"
+            f"🏆 {post['source']}\n"
+            f"📲 @wcupdates2026"
         )
 
         with open(graphic_file, "rb") as img:
@@ -252,15 +273,17 @@ for post in new_posts[:3]:
 
         print(response.status_code)
 
+        if response.status_code == 200:
+            posts_sent += 1
+
         time.sleep(4)
 
     except Exception as e:
         print(e)
 
 with open(POSTED_FILE, "w", encoding="utf-8") as f:
+
     for item in posted_articles:
         f.write(item + "\n")
 
-print(
-    f"Posted {min(len(new_posts), 3)} World Cup articles."
-        )
+print(f"Posted {posts_sent} World Cup articles.")
