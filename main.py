@@ -1,6 +1,7 @@
 import feedparser
 import requests
 import os
+import re
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
@@ -13,9 +14,38 @@ FEEDS = {
     "90Min": "https://www.90min.com/posts.rss"
 }
 
+WORLD_CUP_KEYWORDS = [
+    "world cup",
+    "fifa",
+    "usa 2026",
+    "canada 2026",
+    "mexico 2026",
+    "international",
+    "national team",
+    "qualification",
+    "qualifier",
+    "group stage",
+    "round of 16",
+    "quarter-final",
+    "quarterfinal",
+    "semi-final",
+    "semifinal",
+    "final",
+    "argentina",
+    "brazil",
+    "england",
+    "france",
+    "germany",
+    "spain",
+    "portugal",
+    "netherlands",
+    "usa",
+    "mexico",
+    "canada"
+]
+
 if not os.path.exists(POSTED_FILE):
-    with open(POSTED_FILE, "w", encoding="utf-8"):
-        pass
+    open(POSTED_FILE, "w").close()
 
 with open(POSTED_FILE, "r", encoding="utf-8") as f:
     posted_links = set(
@@ -33,50 +63,75 @@ for source, url in FEEDS.items():
     if not hasattr(feed, "entries"):
         continue
 
-    for article in feed.entries[:10]:
+    for article in feed.entries[:20]:
 
-        link = getattr(article, "link", None)
-        title = getattr(article, "title", None)
+        link = getattr(article, "link", "")
+        title = getattr(article, "title", "")
+
+        summary = getattr(article, "summary", "")
 
         if not link or not title:
             continue
 
-        if link not in posted_links:
+        text_to_check = (
+            title.lower() + " " +
+            re.sub("<.*?>", "", summary).lower()
+        )
 
-            image_url = None
+        if not any(
+            keyword in text_to_check
+            for keyword in WORLD_CUP_KEYWORDS
+        ):
+            continue
 
-            if "media_content" in article:
-                try:
-                    image_url = article.media_content[0]["url"]
-                except:
-                    pass
+        if link in posted_links:
+            continue
 
-            if not image_url and "media_thumbnail" in article:
-                try:
-                    image_url = article.media_thumbnail[0]["url"]
-                except:
-                    pass
+        image_url = None
 
-            new_posts.append({
-                "source": source,
-                "title": title,
-                "link": link,
-                "image": image_url
-            })
+        if "media_content" in article:
+            try:
+                image_url = article.media_content[0]["url"]
+            except:
+                pass
 
-            posted_links.add(link)
+        if not image_url and "media_thumbnail" in article:
+            try:
+                image_url = article.media_thumbnail[0]["url"]
+            except:
+                pass
+
+        clean_summary = re.sub(
+            "<.*?>",
+            "",
+            summary
+        ).strip()
+
+        clean_summary = clean_summary[:350]
+
+        new_posts.append({
+            "source": source,
+            "title": title,
+            "summary": clean_summary,
+            "link": link,
+            "image": image_url
+        })
+
+        posted_links.add(link)
 
 if not new_posts:
-    print("No new articles found.")
+    print("No World Cup news found.")
 
 else:
 
     for post in new_posts:
 
         caption = f"""
-🚨 BREAKING NEWS
+🌎 WORLD CUP NEWS
 
 📰 {post['title']}
+
+📖 {post['summary']}
 
 🏆 Source: {post['source']}
 
@@ -105,10 +160,9 @@ else:
             )
 
         print(response.status_code)
-        print(response.text)
 
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
         for link in posted_links:
             f.write(link + "\n")
 
-    print(f"Posted {len(new_posts)} new articles.")
+    print(f"Posted {len(new_posts)} World Cup articles.")
