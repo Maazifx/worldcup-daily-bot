@@ -4,6 +4,7 @@ import os
 import re
 import time
 import random
+import json
 
 from io import BytesIO
 from PIL import Image
@@ -285,24 +286,26 @@ for post in new_posts:
 
         with open(graphic_file, "rb") as img:
 
-            response = requests.post(
+            reply_markup = {
+    "inline_keyboard": [[
+        {
+            "text": "📰 Read Full Story",
+            "url": post["link"]
+        }
+    ]]
+}
+
+response = requests.post(
     f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
     data={
         "chat_id": CHAT_ID,
         "caption": caption[:1024],
-        "reply_markup": f'''{{
-            "inline_keyboard":[[
-                {{
-                    "text":"📰 Read Full Story",
-                    "url":"{post["link"]}"
-                }}
-            ]]
-        }}'''
+        "reply_markup": json.dumps(reply_markup)
     },
     files={
         "photo": img
     }
-            )
+)
         print(response.status_code)
 
         if response.status_code == 200:
