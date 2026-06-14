@@ -1,130 +1,201 @@
 import requests
 import os
+import re
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
-POSTED_FILE = "posted_matches.txt"
+POSTED_FILE = "posted_articles.txt"
+
+FEEDS = {
+    "BBC Sport": "https://feeds.bbci.co.uk/sport/football/rss.xml",
+    "Sky Sports": "https://www.skysports.com/rss/12040",
+    "90Min": "https://www.90min.com/posts.rss"
+}
+
+WORLD_CUP_KEYWORDS = [
+    "world cup",
+    "fifa",
+    "usa 2026",
+    "canada 2026",
+    "mexico 2026",
+    "international",
+    "national team",
+    "qualification",
+    "qualifier",
+    "group stage",
+    "round of 16",
+    "quarter-final",
+    "quarterfinal",
+    "semi-final",
+    "semifinal",
+    "final",
+    "argentina",
+    "brazil",
+    "england",
+    "france",
+    "germany",
+    "spain",
+    "portugal",
+    "netherlands",
+    "usa",
+    "mexico",
+    "canada",
+    "scotland",
+    "australia",
+    "japan",
+    "curaçao",
+    "ecuador",
+    "tunisia"
+]
 
 if not os.path.exists(POSTED_FILE):
     open(POSTED_FILE, "w").close()
 
 with open(POSTED_FILE, "r", encoding="utf-8") as f:
-    posted = set(
+    posted_articles = set(
         line.strip()
         for line in f
         if line.strip()
     )
 
-url = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard"
+new_posts = []
 
-response = requests.get(url)
+for source, url in FEEDS.items():
 
-if response.status_code != 200:
-    print("Could not fetch scoreboard.")
-    exit()
+    feed = feedparser.parse(url)
 
-data = response.json()
+    if not hasattr(feed, "entries"):
+        continue
 
-events = data.get("events", [])
+    for article in feed.entries[:20]:
 
-for event in events:
+        title = getattr(article, "title", "").strip()
+        link = getattr(article, "link", "").strip()
+        summary = getattr(article, "summary", "").strip()
 
-    competition = event["competitions"][0]
+        if not title or not link:
+            continue
 
-    home = competition["competitors"][0]["team"]["displayName"]
-    away = competition["competitors"][1]["team"]["displayName"]
+        # Skip podcasts and audio content
+        if "sounds/play" in link:
+            continue
 
-    home_score = competition["competitors"][0]["score"]
-    away_score = competition["competitors"][1]["score"]
+        if "football daily" in title.lower():
+            continue
 
-    status = competition["status"]["type"]["description"]
-    match_id = event["id"]
+        if "podcast" in title.lower():
+            continue
 
-    telegram_url = (
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        if "audio" in title.lower():
+            continue
+
+        clean_summary = re.sub("<.*?>", "", summary)
+
+        article_text = (
+            title.lower() +
+            " " +
+            clean_summary.lower()
+        )
+
+        if not any(
+            keyword.lower() in article_text
+            for keyword in WORLD_CUP_KEYWORDS
+        ):
+            continue
+
+        article_key = f"{title}|{link}"
+
+        if article_key in posted_articles:
+            continue
+
+        image_url = None
+
+        if hasattr(article, "media_content"):
+            try:
+                image_url = article.media_content[0]["url"]
+            except Exception:
+                pass
+
+        if not image_url and hasattr(article, "media_thumbnail"):
+            try:
+                image_url = article.media_thumbnail[0]["url"]
+            except Exception:
+                pass
+
+        clean_summary = clean_summary[:350]
+
+        new_posts.append({
+            "key": article_key,
+            "source": source,
+            "title": title,
+            "summary": clean_summary,
+            "link": link,
+            "image": image_url
+        })
+
+        posted_articles.add(article_key)
+
+if not new_posts:
+    print("No World Cup news found.")
+
+else:
+
+    for post in new_posts:
+
+        caption = (
+            f"🌎 WORLD CUP NEWS\n\n"
+"
+            f"📖 {post['summary']}\n\n"
+            f"🏆 Source: {post['source']}\n\n"
+            f"🔗 {post['link']}"
+        )
+
+        try:
+
+            if post["image"]:
+
+    try:
+
+        image_response = requests.get(
+            post["image"],
+            timeout=20
+        )
+
+        with open("temp.jpg", "wb") as img:
+            img.write(image_response.content)
+
+        with open("temp.jpg", "rb") as img:
+
+            response = requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+                data={
+                    "chat_id": CHAT_ID,
+                    "caption": caption[:1024]
+                },
+                files={
+                    "photo": img
+                }
+            )
+
+    except Exception as e:
+
+        print(e)
+
+        response = requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data={
+                "chat_id": CHAT_ID,
+                "text": caption
+            }
     )
+            print(response.status_code)
 
-    # MATCH STARTED
+        except Exception as e:
+            print(e)
 
-    if status.lower() in ["first half", "second half"]:
+    with open(POSTED_FILE, "w", encoding="utf-8") as f:
+        for item in posted_articles:
+            f.write(item + "\n")
 
-        alert_key = f"START-{match_id}"
-
-        if alert_key not in posted:
-
-            message = f"""
-⚽ MATCH STARTED
-
-{home} vs {away}
-
-🌎 FIFA WORLD CUP 2026
-"""
-
-            requests.post(
-                telegram_url,
-                data={
-                    "chat_id": CHAT_ID,
-                    "text": message
-                }
-            )
-
-            posted.add(alert_key)
-
-    # HALF TIME
-
-    if status.lower() == "halftime":
-
-        alert_key = f"HT-{match_id}"
-
-        if alert_key not in posted:
-
-            message = f"""
-⏸ HALF TIME
-
-{home} {home_score}-{away_score} {away}
-
-🌎 FIFA WORLD CUP 2026
-"""
-
-            requests.post(
-                telegram_url,
-                data={
-                    "chat_id": CHAT_ID,
-                    "text": message
-                }
-            )
-
-            posted.add(alert_key)
-
-    # FULL TIME
-
-    if status.lower() == "final":
-
-        alert_key = f"FT-{match_id}"
-
-        if alert_key not in posted:
-
-            message = f"""
-🏁 FULL TIME
-
-{home} {home_score}-{away_score} {away}
-
-🌎 FIFA WORLD CUP 2026
-"""
-
-            requests.post(
-                telegram_url,
-                data={
-                    "chat_id": CHAT_ID,
-                    "text": message
-                }
-            )
-
-            posted.add(alert_key)
-
-with open(POSTED_FILE, "w", encoding="utf-8") as f:
-    for item in posted:
-        f.write(item + "\n")
-
-print("Finished checking matches.")
+    print(f"Posted {len(new_posts)} World Cup articles.")
