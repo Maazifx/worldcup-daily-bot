@@ -8,14 +8,13 @@ CHAT_ID = os.environ["CHAT_ID"]
 STATE_FILE = "daily_fixtures_state.txt"
 
 today = datetime.now(timezone.utc).date()
+today_string = today.strftime("%Y-%m-%d")
 
 last_posted = ""
 
 if os.path.exists(STATE_FILE):
     with open(STATE_FILE, "r", encoding="utf-8") as f:
         last_posted = f.read().strip()
-
-today_string = today.strftime("%Y-%m-%d")
 
 if last_posted == today_string:
     print("Today's fixtures already posted.")
@@ -33,27 +32,32 @@ data = response.json()
 
 events = data.get("events", [])
 
+if not events:
+    print("No fixtures found.")
+    exit()
+
 message = "📅 TODAY'S WORLD CUP MATCHES\n\n"
 
 fixture_count = 0
 
-finished_statuses = [
-    "final",
-    "full time",
-    "after extra time",
-    "after penalties"
-]
-
 for event in events:
-    for event in events:
 
-    print(event["date"])
-    print(event["status"]["type"]["description"])
-    print(event["name"])
-    print("----------------")
+    status = (
+        event.get("status", {})
+        .get("type", {})
+        .get("description", "")
+        .lower()
+    )
 
-    competition = event["competitions"][0]
-    
+    if (
+        "final" in status
+        or "complete" in status
+        or "finished" in status
+        or "after extra time" in status
+        or "after penalties" in status
+    ):
+        continue
+
     match_date = event.get("date")
 
     if not match_date:
@@ -67,19 +71,7 @@ for event in events:
     except Exception:
         continue
 
-    match_day = match_time.date()
-
-    if match_day != today:
-        continue
-
-    status = (
-        event.get("status", {})
-        .get("type", {})
-        .get("description", "")
-        .lower()
-    )
-
-    if status in finished_statuses:
+    if match_time.date() != today:
         continue
 
     competition = event["competitions"][0]
