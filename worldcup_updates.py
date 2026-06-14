@@ -145,14 +145,23 @@ for post in new_posts[:3]:
         f"🚨 BREAKING\n\n"
         f"{post['title']}\n\n"
         f"{post['summary']}\n\n"
-        f"📲 @WorldCup2026Updates"
+        f"📲 @wcupdates2026"
     )
 
     try:
 
-        graphic_file = create_graphic(
-            post["title"]
-        )
+        image_response = requests.get(
+post["image"],
+timeout=20
+)
+
+with open("article.jpg", "wb") as img:
+img.write(image_response.content)
+
+graphic_file = create_graphic(
+"article.jpg",
+post["title"]
+)
 
         with open(graphic_file, "rb") as img:
 
