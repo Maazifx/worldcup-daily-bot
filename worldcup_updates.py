@@ -12,10 +12,20 @@ CHAT_ID = os.environ["CHAT_ID"]
 POSTED_FILE = "posted_articles.txt"
 
 FEEDS = {
+    "BBC Sport": "https://feeds.bbci.co.uk/sport/football/rss.xml",
     "Sky Sports": "https://www.skysports.com/rss/12040",
-    "90Min": "https://www.90min.com/posts.rss",
-    "BBC Sport": "https://feeds.bbci.co.uk/sport/football/rss.xml"
+    "ESPN FC": "https://www.espn.com/espn/rss/soccer/news",
+    "The Guardian": "https://www.theguardian.com/football/rss",
+    "90Min": "https://www.90min.com/posts.rss"
 }
+
+SOURCE_PRIORITY = [
+    "BBC Sport",
+    "Sky Sports",
+    "ESPN FC",
+    "The Guardian",
+    "90Min"
+]
 
 WORLD_CUP_KEYWORDS = [
     "world cup",
@@ -84,7 +94,12 @@ BANNED_WORDS = [
     "cycling",
     "podcast",
     "football daily",
-    "audio"
+    "audio",
+    "transfer rumours",
+    "fantasy football",
+    "betting",
+    "odds",
+    "prediction"
 ]
 
 if not os.path.exists(POSTED_FILE):
@@ -100,7 +115,9 @@ with open(POSTED_FILE, "r", encoding="utf-8") as f:
 
 new_posts = []
 
-for source, url in FEEDS.items():
+for source in SOURCE_PRIORITY:
+
+    url = FEEDS[source]
 
     feed = feedparser.parse(url)
 
@@ -111,7 +128,7 @@ for source, url in FEEDS.items():
 
     for article in feed.entries[:25]:
 
-        if source_post_count >= 1:
+        if source_post_count >= 2:
             break
 
         title = getattr(article, "title", "").strip()
@@ -191,8 +208,9 @@ for post in new_posts[:3]:
 
     caption = (
         f"🚨 BREAKING\n\n"
-        f"{post['title']}\n\n"
+        f"📰 {post['title']}\n\n"
         f"{post['summary']}\n\n"
+        f"🏆 Source: {post['source']}\n"
         f"📲 @wcupdates2026"
     )
 
@@ -245,4 +263,4 @@ with open(POSTED_FILE, "w", encoding="utf-8") as f:
 
 print(
     f"Posted {min(len(new_posts), 3)} World Cup articles."
-)
+        )
