@@ -271,50 +271,51 @@ for post in new_posts:
 
     try:
 
-        graphic_file = create_graphic(
-            image_file,
-            post["title"]
-        )
-
-        caption = (
-            f"🚨 BREAKING\n\n"
-            f"{post['title']}\n\n"
-            f"{post['summary']}\n\n"
-            f"🏆 Source: {post['source']}\n"
-            f"📲 @wcupdates2026"
-        )
-
-        with open(graphic_file, "rb") as img:
-
-            reply_markup = {
-    "inline_keyboard": [[
-        {
-            "text": "📰 Read Full Story",
-            "url": post["link"]
-        }
-    ]]
-}
-
-response = requests.post(
-    f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
-    data={
-        "chat_id": CHAT_ID,
-        "caption": caption[:1024],
-        "reply_markup": json.dumps(reply_markup)
-    },
-    files={
-        "photo": img
-    }
+graphic_file = create_graphic(
+    image_file,
+    post["title"]
 )
-        print(response.status_code)
 
-        if response.status_code == 200:
-            posts_sent += 1
+caption = (
+    f"🚨 BREAKING\n\n"
+    f"{post['title']}\n\n"
+    f"{post['summary']}\n\n"
+    f"🏆 Source: {post['source']}\n"
+    f"📲 @wcupdates2026"
+)
 
-        time.sleep(4)
+with open(graphic_file, "rb") as img:
 
-    except Exception as e:
-        print(e)
+    reply_markup = {
+        "inline_keyboard": [[
+            {
+                "text": "📰 Read Full Story",
+                "url": post["link"]
+            }
+        ]]
+    }
+
+    response = requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+        data={
+            "chat_id": CHAT_ID,
+            "caption": caption[:1024],
+            "reply_markup": json.dumps(reply_markup)
+        },
+        files={
+            "photo": img
+        }
+    )
+
+print(response.status_code)
+
+if response.status_code == 200:
+    posts_sent += 1
+
+time.sleep(4)
+
+except Exception as e:
+print(e)
 
 with open(POSTED_FILE, "w", encoding="utf-8") as f:
 
