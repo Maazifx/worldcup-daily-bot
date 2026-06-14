@@ -208,4 +208,4 @@ with open(POSTED_FILE, "w", encoding="utf-8") as f:
 
 print(
     f"Posted {min(len(new_posts), 3)} World Cup articles."
-        )
+)
