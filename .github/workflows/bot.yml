@@ -69,16 +69,16 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: python worldcup_updates.py
 
-      - name: Save Match History
+      - name: Save World Cup History
         continue-on-error: true
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
 
-          git add posted_matches.txt
+          git add posted_articles.txt
 
           if ! git diff --staged --quiet; then
-            git commit -m "Update match history"
+            git commit -m "Update World Cup history"
             git pull --rebase origin main || true
             git push origin HEAD:main || true
           fi
