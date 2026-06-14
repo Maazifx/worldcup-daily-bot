@@ -3,6 +3,7 @@ import requests
 import os
 import re
 import time
+import random
 
 from io import BytesIO
 from PIL import Image
@@ -109,7 +110,23 @@ BANNED_WORDS = [
     "jersey leak"
 ]
 
+def get_fallback_image():
+
+    backgrounds = [
+        "backgrounds/bg1.jpg",
+        "backgrounds/bg2.jpg",
+        "backgrounds/bg3.jpg",
+        "backgrounds/bg4.jpg",
+        "backgrounds/bg5.jpg",
+        "backgrounds/bg6.jpg"
+    ]
+
+    return random.choice(backgrounds)
+
 def get_best_image(image_url):
+
+    if image_url == "BBC_FALLBACK":
+        return get_fallback_image()
 
     try:
 
@@ -124,7 +141,7 @@ def get_best_image(image_url):
         )
 
         if response.status_code != 200:
-            return None
+            return get_fallback_image()
 
         image = Image.open(
             BytesIO(response.content)
@@ -133,7 +150,7 @@ def get_best_image(image_url):
         width, height = image.size
 
         if width < 400:
-            return None
+            return get_fallback_image()
 
         with open("article.jpg", "wb") as f:
             f.write(response.content)
@@ -141,8 +158,7 @@ def get_best_image(image_url):
         return "article.jpg"
 
     except Exception:
-        return None
-
+        return get_fallback_image()
 
 if not os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "w", encoding="utf-8"):
@@ -220,7 +236,7 @@ for source in SOURCE_PRIORITY:
                 pass
 
         if not image_url:
-            continue
+            image_url = "BBC_FALLBACK"
 
         new_posts.append({
             "source": source,
