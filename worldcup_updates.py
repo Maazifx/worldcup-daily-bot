@@ -269,8 +269,7 @@ for post in new_posts:
     if not image_file:
         continue
 
-    try:
-
+   try:
 graphic_file = create_graphic(
     image_file,
     post["title"]
