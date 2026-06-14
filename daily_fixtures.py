@@ -45,7 +45,15 @@ finished_statuses = [
 ]
 
 for event in events:
+    for event in events:
 
+    print(event["date"])
+    print(event["status"]["type"]["description"])
+    print(event["name"])
+    print("----------------")
+
+    competition = event["competitions"][0]
+    
     match_date = event.get("date")
 
     if not match_date:
