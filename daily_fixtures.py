@@ -40,6 +40,8 @@ message = "📅 TODAY'S WORLD CUP MATCHES\n\n"
 
 fixture_count = 0
 
+now = datetime.now(timezone.utc)
+
 for event in events:
 
     status = (
@@ -52,6 +54,7 @@ for event in events:
     if (
         "final" in status
         or "complete" in status
+        or "completed" in status
         or "finished" in status
         or "after extra time" in status
         or "after penalties" in status
@@ -71,7 +74,12 @@ for event in events:
     except Exception:
         continue
 
+    # Only today's matches
     if match_time.date() != today:
+        continue
+
+    # Skip matches whose kickoff time has passed
+    if match_time < now:
         continue
 
     competition = event["competitions"][0]
