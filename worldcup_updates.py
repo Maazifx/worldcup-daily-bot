@@ -20,11 +20,11 @@ FEEDS = {
 WORLD_CUP_KEYWORDS = [
     "world cup",
     "fifa",
+    "fifa world cup",
+    "world cup 2026",
     "usa 2026",
     "canada 2026",
     "mexico 2026",
-    "international",
-    "national team",
     "qualification",
     "qualifier",
     "group stage",
@@ -34,6 +34,11 @@ WORLD_CUP_KEYWORDS = [
     "semi-final",
     "semifinal",
     "final",
+    "knockout",
+    "international football",
+    "national team",
+    "soccer",
+    "football",
     "argentina",
     "brazil",
     "england",
@@ -42,6 +47,9 @@ WORLD_CUP_KEYWORDS = [
     "spain",
     "portugal",
     "netherlands",
+    "belgium",
+    "croatia",
+    "morocco",
     "usa",
     "mexico",
     "canada",
@@ -50,7 +58,33 @@ WORLD_CUP_KEYWORDS = [
     "japan",
     "ecuador",
     "tunisia",
-    "curaçao"
+    "ivory coast",
+    "turkiye"
+]
+
+BANNED_WORDS = [
+    "darts",
+    "rugby",
+    "cricket",
+    "golf",
+    "tennis",
+    "formula 1",
+    "f1",
+    "motogp",
+    "boxing",
+    "ufc",
+    "mma",
+    "snooker",
+    "basketball",
+    "nba",
+    "nfl",
+    "baseball",
+    "mlb",
+    "horse racing",
+    "cycling",
+    "podcast",
+    "football daily",
+    "audio"
 ]
 
 if not os.path.exists(POSTED_FILE):
@@ -75,7 +109,7 @@ for source, url in FEEDS.items():
 
     source_post_count = 0
 
-    for article in feed.entries[:20]:
+    for article in feed.entries[:25]:
 
         if source_post_count >= 1:
             break
@@ -90,15 +124,6 @@ for source, url in FEEDS.items():
         if "sounds/play" in link:
             continue
 
-        if "football daily" in title.lower():
-            continue
-
-        if "podcast" in title.lower():
-            continue
-
-        if "audio" in title.lower():
-            continue
-
         clean_summary = re.sub(
             "<.*?>",
             "",
@@ -111,15 +136,22 @@ for source, url in FEEDS.items():
             + clean_summary.lower()
         )
 
+        if any(
+            word in article_text
+            for word in BANNED_WORDS
+        ):
+            continue
+
         if not any(
             keyword.lower() in article_text
             for keyword in WORLD_CUP_KEYWORDS
         ):
             continue
 
-        article_key = f"{title}|{link}"
+        article_key = link
 
         if article_key in posted_articles:
+            print(f"Skipping duplicate: {title}")
             continue
 
         image_url = None
@@ -143,7 +175,7 @@ for source, url in FEEDS.items():
             "key": article_key,
             "source": source,
             "title": title,
-            "summary": clean_summary[:400],
+            "summary": clean_summary[:350],
             "link": link,
             "image": image_url
         })
@@ -166,8 +198,13 @@ for post in new_posts[:3]:
 
     try:
 
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+
         image_response = requests.get(
             post["image"],
+            headers=headers,
             timeout=20
         )
 
@@ -197,7 +234,7 @@ for post in new_posts[:3]:
 
         print(response.status_code)
 
-        time.sleep(3)
+        time.sleep(4)
 
     except Exception as e:
         print(e)
