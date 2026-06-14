@@ -2,6 +2,8 @@ import requests
 import os
 from datetime import datetime, timezone
 
+print("FIXTURES BOT VERSION 2")
+
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
