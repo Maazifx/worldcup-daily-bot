@@ -1,66 +1,111 @@
 from PIL import Image
 from PIL import ImageDraw
 from PIL import ImageFont
-import textwrap
 
 WIDTH = 1080
-HEIGHT = 1080
+HEIGHT = 1350
 
-BACKGROUND = (8, 18, 40)
-WHITE = (255, 255, 255)
-GOLD = (255, 215, 0)
+def create_graphic(image_path, headline):
 
-def create_graphic(headline):
+image = Image.open(image_path)
 
-    image = Image.new(
-        "RGB",
-        (WIDTH, HEIGHT),
-        BACKGROUND
+image = image.convert("RGB")
+
+image = image.resize(
+    (WIDTH, HEIGHT)
+)
+
+draw = ImageDraw.Draw(image)
+
+overlay_height = 420
+
+draw.rectangle(
+    (
+        0,
+        HEIGHT - overlay_height,
+        WIDTH,
+        HEIGHT
+    ),
+    fill=(0, 0, 0, 180)
+)
+
+draw.rectangle(
+    (
+        0,
+        HEIGHT - overlay_height,
+        WIDTH,
+        HEIGHT - overlay_height + 110
+    ),
+    fill=(220, 0, 0)
+)
+
+try:
+
+    headline_font = ImageFont.truetype(
+        "DejaVuSans-Bold.ttf",
+        58
     )
 
-    draw = ImageDraw.Draw(image)
+    small_font = ImageFont.truetype(
+        "DejaVuSans-Bold.ttf",
+        38
+    )
 
-    try:
-        title_font = ImageFont.truetype(
-            "arial.ttf",
-            90
-        )
+except:
 
-        headline_font = ImageFont.truetype(
-            "arial.ttf",
-            75
-        )
+    headline_font = ImageFont.load_default()
+    small_font = ImageFont.load_default()
 
-    except:
-        title_font = ImageFont.load_default()
-        headline_font = ImageFont.load_default()
+draw.text(
+    (40, HEIGHT - 390),
+    "BREAKING",
+    fill="white",
+    font=small_font
+)
+
+lines = []
+
+words = headline.split()
+
+current = ""
+
+for word in words:
+
+    test = current + " " + word
+
+    if len(test) < 28:
+        current = test
+    else:
+        lines.append(current)
+        current = word
+
+lines.append(current)
+
+y = HEIGHT - 250
+
+for line in lines[:3]:
 
     draw.text(
-        (60, 80),
-        "FIFA WORLD CUP 2026",
-        fill=WHITE,
-        font=title_font
-    )
-
-    wrapped = textwrap.fill(
-        headline.upper(),
-        width=18
-    )
-
-    draw.text(
-        (60, 320),
-        wrapped,
-        fill=WHITE,
+        (40, y),
+        line.strip(),
+        fill="white",
         font=headline_font
     )
 
-    draw.text(
-        (60, 920),
-        "@WORLDCUP2026UPDATES",
-        fill=GOLD,
-        font=headline_font
-    )
+    y += 70
 
-    image.save("news_card.png")
+draw.text(
+    (40, HEIGHT - 70),
+    "@wcupdates2026",
+    fill=(255, 215, 0),
+    font=small_font
+)
 
-    return "news_card.png"
+output = "final_news.jpg"
+
+image.save(
+    output,
+    quality=95
+)
+
+return output
