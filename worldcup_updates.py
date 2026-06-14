@@ -40,6 +40,8 @@ WORLD_CUP_KEYWORDS = [
     "mexico 2026",
     "qualification",
     "qualifier",
+    "world cup qualifier",
+    "world cup qualifying",
     "group stage",
     "round of 16",
     "quarter-final",
@@ -97,7 +99,14 @@ BANNED_WORDS = [
     "football daily",
     "audio",
     "betting",
-    "odds"
+    "odds",
+    "transfer rumours",
+    "transfer rumor",
+    "kit leaked",
+    "home kit",
+    "away kit",
+    "third kit",
+    "jersey leak"
 ]
 
 def get_best_image(image_url):
@@ -123,7 +132,7 @@ def get_best_image(image_url):
 
         width, height = image.size
 
-        if width < 600:
+        if width < 400:
             return None
 
         with open("article.jpg", "wb") as f:
@@ -157,7 +166,7 @@ for source in SOURCE_PRIORITY:
 
     source_count = 0
 
-    for article in feed.entries[:25]:
+    for article in feed.entries[:50]:
 
         if source_count >= 2:
             break
@@ -254,7 +263,7 @@ for post in new_posts:
             f"🚨 BREAKING\n\n"
             f"{post['title']}\n\n"
             f"{post['summary']}\n\n"
-            f"🏆 {post['source']}\n"
+            f"🏆 Source: {post['source']}\n"
             f"📲 @wcupdates2026"
         )
 
