@@ -51,7 +51,7 @@ WORLD_CUP_KEYWORDS = [
     "ecuador",
     "tunisia",
     "curaçao"
-}
+]
 
 if not os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "w", encoding="utf-8"):
