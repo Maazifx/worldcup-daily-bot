@@ -26,7 +26,7 @@ draw.rectangle(
         WIDTH,
         HEIGHT
     ),
-    fill=(0, 0, 0, 180)
+    fill=(0, 0, 0)
 )
 
 draw.rectangle(
