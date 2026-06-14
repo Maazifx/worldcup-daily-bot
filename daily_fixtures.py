@@ -7,7 +7,7 @@ CHAT_ID = os.environ["CHAT_ID"]
 
 STATE_FILE = "daily_fixtures_state.txt"
 
-today = datetime.utcnow().strftime("%Y-%m-%d")
+today = datetime.now(timezone.utc).date()
 
 last_posted = ""
 
@@ -15,7 +15,9 @@ if os.path.exists(STATE_FILE):
     with open(STATE_FILE, "r", encoding="utf-8") as f:
         last_posted = f.read().strip()
 
-if last_posted == today:
+today_string = today.strftime("%Y-%m-%d")
+
+if last_posted == today_string:
     print("Today's fixtures already posted.")
     exit()
 
@@ -31,24 +33,36 @@ data = response.json()
 
 events = data.get("events", [])
 
-if not events:
-    print("No fixtures found.")
-    exit()
-
 message = "📅 TODAY'S WORLD CUP MATCHES\n\n"
 
 fixture_count = 0
 
-completed_statuses = [
+finished_statuses = [
     "final",
     "full time",
     "after extra time",
     "after penalties"
 ]
 
-now = datetime.now(timezone.utc)
-
 for event in events:
+
+    match_date = event.get("date")
+
+    if not match_date:
+        continue
+
+    try:
+        match_time = datetime.fromisoformat(
+            match_date.replace("Z", "+00:00")
+        )
+
+    except Exception:
+        continue
+
+    match_day = match_time.date()
+
+    if match_day != today:
+        continue
 
     status = (
         event.get("status", {})
@@ -57,7 +71,7 @@ for event in events:
         .lower()
     )
 
-    if status in completed_statuses:
+    if status in finished_statuses:
         continue
 
     competition = event["competitions"][0]
@@ -65,20 +79,7 @@ for event in events:
     home = competition["competitors"][0]["team"]["displayName"]
     away = competition["competitors"][1]["team"]["displayName"]
 
-    match_date = event["date"]
-
-    try:
-        dt = datetime.fromisoformat(
-            match_date.replace("Z", "+00:00")
-        )
-
-        if dt < now and status in completed_statuses:
-            continue
-
-        time_string = dt.strftime("%H:%M UTC")
-
-    except Exception:
-        time_string = "TBA"
+    time_string = match_time.strftime("%H:%M UTC")
 
     fixture_count += 1
 
@@ -88,15 +89,11 @@ for event in events:
     )
 
 if fixture_count == 0:
-    print("No upcoming fixtures.")
+    print("No upcoming fixtures today.")
     exit()
 
-telegram_url = (
-    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-)
-
 telegram_response = requests.post(
-    telegram_url,
+    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
     data={
         "chat_id": CHAT_ID,
         "text": message
@@ -106,6 +103,6 @@ telegram_response = requests.post(
 print(telegram_response.status_code)
 
 with open(STATE_FILE, "w", encoding="utf-8") as f:
-    f.write(today)
+    f.write(today_string)
 
-print("Fixtures posted.")
+print("Today's fixtures posted.")
