@@ -259,31 +259,31 @@ posts_sent = 0
 
 for post in new_posts:
 
-    if posts_sent >= 3:
-        break
+```
+if posts_sent >= 3:
+    break
 
-    image_file = get_best_image(
-        post["image"]
+image_file = get_best_image(
+    post["image"]
+)
+
+if not image_file:
+    continue
+
+try:
+
+    graphic_file = create_graphic(
+        image_file,
+        post["title"]
     )
 
-    if not image_file:
-        continue
-
-   try:
-graphic_file = create_graphic(
-    image_file,
-    post["title"]
-)
-
-caption = (
-    f"🚨 BREAKING\n\n"
-    f"{post['title']}\n\n"
-    f"{post['summary']}\n\n"
-    f"🏆 Source: {post['source']}\n"
-    f"📲 @wcupdates2026"
-)
-
-with open(graphic_file, "rb") as img:
+    caption = (
+        f"🚨 BREAKING\n\n"
+        f"{post['title']}\n\n"
+        f"{post['summary']}\n\n"
+        f"🏆 Source: {post['source']}\n"
+        f"📲 @wcupdates2026"
+    )
 
     reply_markup = {
         "inline_keyboard": [[
@@ -294,31 +294,33 @@ with open(graphic_file, "rb") as img:
         ]]
     }
 
-    response = requests.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
-        data={
-            "chat_id": CHAT_ID,
-            "caption": caption[:1024],
-            "reply_markup": json.dumps(reply_markup)
-        },
-        files={
-            "photo": img
-        }
-    )
+    with open(graphic_file, "rb") as img:
 
-print(response.status_code)
+        response = requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+            data={
+                "chat_id": CHAT_ID,
+                "caption": caption[:1024],
+                "reply_markup": json.dumps(reply_markup)
+            },
+            files={
+                "photo": img
+            }
+        )
 
-if response.status_code == 200:
-    posts_sent += 1
+    print(response.status_code)
 
-time.sleep(4)
+    if response.status_code == 200:
+        posts_sent += 1
+
+    time.sleep(4)
 
 except Exception as e:
-print(e)
+    print(e)
 
 with open(POSTED_FILE, "w", encoding="utf-8") as f:
 
-    for item in posted_articles:
-        f.write(item + "\n")
+for item in posted_articles:
+    f.write(item + "\n")
 
 print(f"Posted {posts_sent} World Cup articles.")
