@@ -2,6 +2,7 @@ import feedparser
 import requests
 import os
 import re
+import time
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
@@ -9,9 +10,9 @@ CHAT_ID = os.environ["CHAT_ID"]
 POSTED_FILE = "posted_articles.txt"
 
 FEEDS = {
-    "BBC Sport": "https://feeds.bbci.co.uk/sport/football/rss.xml",
     "Sky Sports": "https://www.skysports.com/rss/12040",
-    "90Min": "https://www.90min.com/posts.rss"
+    "90Min": "https://www.90min.com/posts.rss",
+    "BBC Sport": "https://feeds.bbci.co.uk/sport/football/rss.xml"
 }
 
 WORLD_CUP_KEYWORDS = [
@@ -51,7 +52,8 @@ WORLD_CUP_KEYWORDS = [
 ]
 
 if not os.path.exists(POSTED_FILE):
-    open(POSTED_FILE, "w").close()
+    with open(POSTED_FILE, "w", encoding="utf-8"):
+        pass
 
 with open(POSTED_FILE, "r", encoding="utf-8") as f:
     posted_articles = set(
@@ -69,7 +71,12 @@ for source, url in FEEDS.items():
     if not hasattr(feed, "entries"):
         continue
 
+    source_posts = 0
+
     for article in feed.entries[:20]:
+
+        if source_posts >= 1:
+            break
 
         title = getattr(article, "title", "").strip()
         link = getattr(article, "link", "").strip()
@@ -78,7 +85,7 @@ for source, url in FEEDS.items():
         if not title or not link:
             continue
 
-        # Skip podcasts and audio content
+        # Skip podcasts/audio
         if "sounds/play" in link:
             continue
 
@@ -91,7 +98,11 @@ for source, url in FEEDS.items():
         if "audio" in title.lower():
             continue
 
-        clean_summary = re.sub("<.*?>", "", summary)
+        clean_summary = re.sub(
+            "<.*?>",
+            "",
+            summary
+        ).strip()
 
         article_text = (
             title.lower() +
@@ -124,7 +135,7 @@ for source, url in FEEDS.items():
             except Exception:
                 pass
 
-        clean_summary = clean_summary[:350]
+        clean_summary = clean_summary[:500]
 
         new_posts.append({
             "key": article_key,
@@ -136,32 +147,34 @@ for source, url in FEEDS.items():
         })
 
         posted_articles.add(article_key)
+        source_posts += 1
 
 if not new_posts:
     print("No World Cup news found.")
+    exit()
 
-else:
+for post in new_posts[:3]:
 
-    for post in new_posts:
+    caption = (
+        f"🌎 WORLD CUP NEWS\n\n"
+        f"📰 {post['title']}\n\n"
+        f"📖 {post['summary']}\n\n"
+        f"🏆 Source: {post['source']}\n\n"
+        f"🔗 {post['link']}"
+    )
 
-        caption = (
-            f"🌎 WORLD CUP NEWS\n\n"
-            f"📰 {post['title']}\n\n"
-            f"📖 {post['summary']}\n\n"
-            f"🏆 Source: {post['source']}\n\n"
-            f"🔗 {post['link']}"
-        )
+    try:
 
-        try:
+        if post["image"]:
 
-            if post["image"]:
+            try:
 
-                try:
+                image_response = requests.get(
+                    post["image"],
+                    timeout=20
+                )
 
-                    image_response = requests.get(
-                        post["image"],
-                        timeout=20
-                    )
+                if image_response.status_code == 200:
 
                     with open("temp.jpg", "wb") as img:
                         img.write(image_response.content)
@@ -179,9 +192,7 @@ else:
                             }
                         )
 
-                except Exception as e:
-
-                    print(e)
+                else:
 
                     response = requests.post(
                         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
@@ -191,7 +202,9 @@ else:
                         }
                     )
 
-            else:
+            except Exception as e:
+
+                print(e)
 
                 response = requests.post(
                     f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
@@ -201,13 +214,25 @@ else:
                     }
                 )
 
-            print(response.status_code)
+        else:
 
-        except Exception as e:
-            print(e)
+            response = requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                data={
+                    "chat_id": CHAT_ID,
+                    "text": caption
+                }
+            )
+
+        print(response.status_code)
+
+        time.sleep(3)
+
+    except Exception as e:
+        print(e)
 
 with open(POSTED_FILE, "w", encoding="utf-8") as f:
     for item in posted_articles:
         f.write(item + "\n")
 
-print(f"Posted {len(new_posts)} World Cup articles.")
+print(f"Posted {len(new_posts[:3])} World Cup articles.")
