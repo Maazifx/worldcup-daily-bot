@@ -51,7 +51,7 @@ try:
         38
     )
 
-except:
+except Exception:
 
     headline_font = ImageFont.load_default()
     small_font = ImageFont.load_default()
@@ -63,10 +63,9 @@ draw.text(
     font=small_font
 )
 
-lines = []
-
 words = headline.split()
 
+lines = []
 current = ""
 
 for word in words:
