@@ -1,6 +1,6 @@
 import requests
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
@@ -37,7 +37,28 @@ if not events:
 
 message = "📅 TODAY'S WORLD CUP MATCHES\n\n"
 
+fixture_count = 0
+
+completed_statuses = [
+    "final",
+    "full time",
+    "after extra time",
+    "after penalties"
+]
+
+now = datetime.now(timezone.utc)
+
 for event in events:
+
+    status = (
+        event.get("status", {})
+        .get("type", {})
+        .get("description", "")
+        .lower()
+    )
+
+    if status in completed_statuses:
+        continue
 
     competition = event["competitions"][0]
 
@@ -51,15 +72,24 @@ for event in events:
             match_date.replace("Z", "+00:00")
         )
 
+        if dt < now and status in completed_statuses:
+            continue
+
         time_string = dt.strftime("%H:%M UTC")
 
-    except:
+    except Exception:
         time_string = "TBA"
+
+    fixture_count += 1
 
     message += (
         f"⚽ {home} vs {away}\n"
         f"🕒 {time_string}\n\n"
     )
+
+if fixture_count == 0:
+    print("No upcoming fixtures.")
+    exit()
 
 telegram_url = (
     f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
