@@ -1,3 +1,4 @@
+import feedparser
 import requests
 import os
 import re
@@ -44,9 +45,9 @@ WORLD_CUP_KEYWORDS = [
     "scotland",
     "australia",
     "japan",
-    "curaçao",
     "ecuador",
-    "tunisia"
+    "tunisia",
+    "curaçao"
 ]
 
 if not os.path.exists(POSTED_FILE):
@@ -145,7 +146,7 @@ else:
 
         caption = (
             f"🌎 WORLD CUP NEWS\n\n"
-"
+            f"📰 {post['title']}\n\n"
             f"📖 {post['summary']}\n\n"
             f"🏆 Source: {post['source']}\n\n"
             f"🔗 {post['link']}"
@@ -155,47 +156,58 @@ else:
 
             if post["image"]:
 
-    try:
+                try:
 
-        image_response = requests.get(
-            post["image"],
-            timeout=20
-        )
+                    image_response = requests.get(
+                        post["image"],
+                        timeout=20
+                    )
 
-        with open("temp.jpg", "wb") as img:
-            img.write(image_response.content)
+                    with open("temp.jpg", "wb") as img:
+                        img.write(image_response.content)
 
-        with open("temp.jpg", "rb") as img:
+                    with open("temp.jpg", "rb") as img:
 
-            response = requests.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
-                data={
-                    "chat_id": CHAT_ID,
-                    "caption": caption[:1024]
-                },
-                files={
-                    "photo": img
-                }
-            )
+                        response = requests.post(
+                            f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+                            data={
+                                "chat_id": CHAT_ID,
+                                "caption": caption[:1024]
+                            },
+                            files={
+                                "photo": img
+                            }
+                        )
 
-    except Exception as e:
+                except Exception as e:
 
-        print(e)
+                    print(e)
 
-        response = requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={
-                "chat_id": CHAT_ID,
-                "text": caption
-            }
-    )
+                    response = requests.post(
+                        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                        data={
+                            "chat_id": CHAT_ID,
+                            "text": caption
+                        }
+                    )
+
+            else:
+
+                response = requests.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                    data={
+                        "chat_id": CHAT_ID,
+                        "text": caption
+                    }
+                )
+
             print(response.status_code)
 
         except Exception as e:
             print(e)
 
-    with open(POSTED_FILE, "w", encoding="utf-8") as f:
-        for item in posted_articles:
-            f.write(item + "\n")
+with open(POSTED_FILE, "w", encoding="utf-8") as f:
+    for item in posted_articles:
+        f.write(item + "\n")
 
-    print(f"Posted {len(new_posts)} World Cup articles.")
+print(f"Posted {len(new_posts)} World Cup articles.")
