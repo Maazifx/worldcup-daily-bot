@@ -4,6 +4,8 @@ import os
 import re
 import time
 
+from graphics import create_graphic
+
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
@@ -49,7 +51,7 @@ WORLD_CUP_KEYWORDS = [
     "ecuador",
     "tunisia",
     "curaçao"
-]
+}
 
 if not os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "w", encoding="utf-8"):
@@ -85,7 +87,6 @@ for source, url in FEEDS.items():
         if not title or not link:
             continue
 
-        # Skip podcasts/audio
         if "sounds/play" in link:
             continue
 
@@ -121,29 +122,14 @@ for source, url in FEEDS.items():
         if article_key in posted_articles:
             continue
 
-        image_url = None
-
-        if hasattr(article, "media_content"):
-            try:
-                image_url = article.media_content[0]["url"]
-            except Exception:
-                pass
-
-        if not image_url and hasattr(article, "media_thumbnail"):
-            try:
-                image_url = article.media_thumbnail[0]["url"]
-            except Exception:
-                pass
-
-        clean_summary = clean_summary[:500]
+        clean_summary = clean_summary[:400]
 
         new_posts.append({
             "key": article_key,
             "source": source,
             "title": title,
             "summary": clean_summary,
-            "link": link,
-            "image": image_url
+            "link": link
         })
 
         posted_articles.add(article_key)
@@ -156,71 +142,28 @@ if not new_posts:
 for post in new_posts[:3]:
 
     caption = (
-        f"🌎 WORLD CUP NEWS\n\n"
-        f"📰 {post['title']}\n\n"
-        f"📖 {post['summary']}\n\n"
-        f"🏆 Source: {post['source']}\n\n"
-        f"🔗 {post['link']}"
+        f"🚨 BREAKING\n\n"
+        f"{post['title']}\n\n"
+        f"{post['summary']}\n\n"
+        f"📲 @WorldCup2026Updates"
     )
 
     try:
 
-        if post["image"]:
+        graphic_file = create_graphic(
+            post["title"]
+        )
 
-            try:
-
-                image_response = requests.get(
-                    post["image"],
-                    timeout=20
-                )
-
-                if image_response.status_code == 200:
-
-                    with open("temp.jpg", "wb") as img:
-                        img.write(image_response.content)
-
-                    with open("temp.jpg", "rb") as img:
-
-                        response = requests.post(
-                            f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
-                            data={
-                                "chat_id": CHAT_ID,
-                                "caption": caption[:1024]
-                            },
-                            files={
-                                "photo": img
-                            }
-                        )
-
-                else:
-
-                    response = requests.post(
-                        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                        data={
-                            "chat_id": CHAT_ID,
-                            "text": caption
-                        }
-                    )
-
-            except Exception as e:
-
-                print(e)
-
-                response = requests.post(
-                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                    data={
-                        "chat_id": CHAT_ID,
-                        "text": caption
-                    }
-                )
-
-        else:
+        with open(graphic_file, "rb") as img:
 
             response = requests.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
                 data={
                     "chat_id": CHAT_ID,
-                    "text": caption
+                    "caption": caption[:1024]
+                },
+                files={
+                    "photo": img
                 }
             )
 
@@ -229,10 +172,14 @@ for post in new_posts[:3]:
         time.sleep(3)
 
     except Exception as e:
+
         print(e)
 
 with open(POSTED_FILE, "w", encoding="utf-8") as f:
+
     for item in posted_articles:
         f.write(item + "\n")
 
-print(f"Posted {len(new_posts[:3])} World Cup articles.")
+print(
+    f"Posted {len(new_posts[:3])} World Cup articles."
+)
