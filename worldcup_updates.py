@@ -114,12 +114,12 @@ BANNED_WORDS = [
 def get_fallback_image():
 
     backgrounds = [
-        "backgrounds/bg1.jpg",
-        "backgrounds/bg2.jpg",
-        "backgrounds/bg3.jpg",
-        "backgrounds/bg4.jpg",
-        "backgrounds/bg5.jpg",
-        "backgrounds/bg6.jpg"
+        "background/1571741257821.jpeg",
+        "background/64 qatar.jpg",
+        "background/WC.jpg.webp",
+        "background/gettyimages-1127374662-612x612.jpg",
+        "background/gettyimages-1775210084-612x612.jpg",
+        "background/gettyimages-469569148-612x612.jpg"
     ]
 
     return random.choice(backgrounds)
