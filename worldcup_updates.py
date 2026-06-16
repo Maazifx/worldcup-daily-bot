@@ -247,7 +247,6 @@ for source in SOURCE_PRIORITY:
             "image": image_url
         })
 
-        posted_articles.add(link)
 
         source_count += 1
 
@@ -310,14 +309,21 @@ for post in new_posts:
         print(response.status_code)
 
         if response.status_code == 200:
-            posts_sent += 1
+
+    posts_sent += 1
+
+    posted_articles.add(
+        post["link"]
+    )
 
         time.sleep(4)
 
     except Exception as e:
         print(e)
 
-with open(POSTED_FILE, "w", encoding="utf-8") as f:
+print(
+    f"Saving {len(posted_articles)} posted articles"
+)
 
     for item in posted_articles:
         f.write(item + "\n")
