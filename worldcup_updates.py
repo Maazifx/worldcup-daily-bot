@@ -308,13 +308,13 @@ for post in new_posts:
 
         print(response.status_code)
 
-if response.status_code == 200:
+        if response.status_code == 200:
 
-    posts_sent += 1
+            posts_sent += 1
 
-    posted_articles.add(
-        post["link"]
-    )
+            posted_articles.add(
+                post["link"]
+            )
 
         time.sleep(4)
 
@@ -324,6 +324,8 @@ if response.status_code == 200:
 print(
     f"Saving {len(posted_articles)} posted articles"
 )
+
+with open(POSTED_FILE, "w", encoding="utf-8") as f:
 
     for item in posted_articles:
         f.write(item + "\n")
