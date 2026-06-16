@@ -308,7 +308,7 @@ for post in new_posts:
 
         print(response.status_code)
 
-        if response.status_code == 200:
+if response.status_code == 200:
 
     posts_sent += 1
 
