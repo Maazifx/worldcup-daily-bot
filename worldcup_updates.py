@@ -14,7 +14,7 @@ from graphics import create_graphic
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
-POSTED_FILE = "posted_articles.txt"
+POSTED_FILE = "worldcup_posted_articles.txt"
 
 FEEDS = {
     "BBC Sport": "https://feeds.bbci.co.uk/sport/football/rss.xml",
