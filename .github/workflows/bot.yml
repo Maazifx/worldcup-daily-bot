@@ -44,8 +44,7 @@ jobs:
 
           if ! git diff --staged --quiet; then
             git commit -m "Update World Cup history"
-            git pull --rebase origin main || true
-            git push origin HEAD:main || true
+            git push origin HEAD:main --force
           fi
 
   fixtures:
