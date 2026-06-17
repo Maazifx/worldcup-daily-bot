@@ -1,19 +1,48 @@
 name: World Cup News
+
 on:
   schedule:
     - cron: '*/30 * * * *'
   workflow_dispatch:
 
+concurrency:
+  group: worldcup-push
+  cancel-in-progress: false
+
 jobs:
   run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-      - uses: actions/checkout@v4          # updated
-      - uses: actions/setup-python@v5      # updated
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - run: pip install -r requirements.txt
-      - run: python worldcup_updates.py
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run World Cup Updates
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python worldcup_updates.py
+
+      - name: Save World Cup History
+        continue-on-error: true
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+
+          git add worldcup_posted_articles.txt
+
+          if ! git diff --staged --quiet; then
+            git commit -m "Update World Cup history"
+            git pull --rebase origin main || true
+            git push origin HEAD:main || true
+          fi
