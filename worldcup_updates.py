@@ -82,22 +82,21 @@ BANNED_WORDS = [
     "home kit",
     "away kit",
     "ashes",
- "test match",
-"one day international",
-"odi",
-"t20",
-"county championship",
-"premiership rugby",
-"six nations",
-"wimbledon",
-"atp",
-"wta"
+    "test match",
+    "one day international",
+    "odi",
+    "t20",
+    "county championship",
+    "premiership rugby",
+    "six nations",
+    "wimbledon",
+    "atp",
+    "wta",
     "third kit",
     "jersey leak"
 ]
 
 def get_fallback_image():
-
     backgrounds = [
         "background/1571741257821.jpeg",
         "background/64 qatar.jpg",
@@ -106,70 +105,49 @@ def get_fallback_image():
         "background/gettyimages-1775210084-612x612.jpg",
         "background/gettyimages-469569148-612x612.jpg"
     ]
-
     return random.choice(backgrounds)
 
 def get_best_image(image_url):
-
     if image_url == "BBC_FALLBACK":
         return get_fallback_image()
 
     try:
-
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
-
-        response = requests.get(
-            image_url,
-            headers=headers,
-            timeout=20
-        )
-
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(image_url, headers=headers, timeout=20)
         if response.status_code != 200:
             return get_fallback_image()
 
-        image = Image.open(
-            BytesIO(response.content)
-        )
-
+        image = Image.open(BytesIO(response.content))
         width, height = image.size
-
         if width < 400:
             return get_fallback_image()
 
         with open("article.jpg", "wb") as f:
             f.write(response.content)
-
         return "article.jpg"
 
     except Exception:
         return get_fallback_image()
 
+
+# Load previously posted articles
 if not os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "w", encoding="utf-8"):
         pass
 
 with open(POSTED_FILE, "r", encoding="utf-8") as f:
-    posted_articles = set(
-        line.strip()
-        for line in f
-        if line.strip()
-    )
+    posted_articles = set(line.strip() for line in f if line.strip())
 
 new_posts = []
 
+# Process each RSS source
 for source in SOURCE_PRIORITY:
-
     feed = feedparser.parse(FEEDS[source])
-
     if not hasattr(feed, "entries"):
         continue
 
     source_count = 0
-
     for article in feed.entries[:50]:
-
         if source_count >= 2:
             break
 
@@ -179,74 +157,46 @@ for source in SOURCE_PRIORITY:
 
         if not title or not link:
             continue
-
         if link in posted_articles:
             continue
 
-        clean_summary = re.sub(
-            "<.*?>",
-            "",
-            summary
-        ).strip()
+        clean_summary = re.sub("<.*?>", "", summary).strip()
+        article_text = (title.lower() + " " + clean_summary.lower())
 
-        article_text = (
-            title.lower()
-            + " "
-            + clean_summary.lower()
-        )
+        # ---- Football / soccer filter ----
         football_terms = [
-    "football",
-    "soccer",
-    "fifa",
-    "world cup",
-    "goal",
-    "manager",
-    "midfielder",
-    "defender",
-    "striker",
-    "national team"
-]
-
-if not any(
-    term in article_text
-    for term in football_terms
-):
-    continue
-
-        if any(
-            banned in article_text
-            for banned in BANNED_WORDS
-        ):
+            "football", "soccer", "fifa", "world cup", "goal",
+            "manager", "midfielder", "defender", "striker", "national team"
+        ]
+        if not any(term in article_text for term in football_terms):
             continue
 
-        keyword_match = any(
-    keyword in article_text
-    for keyword in WORLD_CUP_KEYWORDS
-)
+        # ---- Banned words ----
+        if any(banned in article_text for banned in BANNED_WORDS):
+            continue
 
-url_match = (
-    "world-cup" in link.lower()
-    or "worldcup" in link.lower()
-    or "fifa" in link.lower()
-)
+        # ---- World Cup specific keywords ----
+        keyword_match = any(kw in article_text for kw in WORLD_CUP_KEYWORDS)
+        url_match = (
+            "world-cup" in link.lower()
+            or "worldcup" in link.lower()
+            or "fifa" in link.lower()
+        )
+        if not keyword_match and not url_match:
+            continue
 
-if not keyword_match and not url_match:
-    continue
-
+        # ---- Extract image ----
         image_url = None
-
         if hasattr(article, "media_content"):
             try:
                 image_url = article.media_content[0]["url"]
             except Exception:
                 pass
-
         if not image_url and hasattr(article, "media_thumbnail"):
             try:
                 image_url = article.media_thumbnail[0]["url"]
             except Exception:
                 pass
-
         if not image_url:
             image_url = "BBC_FALLBACK"
 
@@ -257,34 +207,24 @@ if not keyword_match and not url_match:
             "link": link,
             "image": image_url
         })
-
-
         source_count += 1
 
 if not new_posts:
     print("No World Cup news found.")
     raise SystemExit
 
+# Send up to 3 posts
 posts_sent = 0
-
 for post in new_posts:
-
     if posts_sent >= 3:
         break
 
-    image_file = get_best_image(
-        post["image"]
-    )
-
+    image_file = get_best_image(post["image"])
     if not image_file:
         continue
 
     try:
-
-        graphic_file = create_graphic(
-            image_file,
-            post["title"]
-        )
+        graphic_file = create_graphic(image_file, post["title"])
 
         caption = (
             f"🚨 BREAKING\n\n"
@@ -304,7 +244,6 @@ for post in new_posts:
         }
 
         with open(graphic_file, "rb") as img:
-
             response = requests.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
                 data={
@@ -312,32 +251,22 @@ for post in new_posts:
                     "caption": caption[:1024],
                     "reply_markup": json.dumps(reply_markup)
                 },
-                files={
-                    "photo": img
-                }
+                files={"photo": img}
             )
 
         print(response.status_code)
-
         if response.status_code == 200:
-
             posts_sent += 1
-
-            posted_articles.add(
-                post["link"]
-            )
+            posted_articles.add(post["link"])
 
         time.sleep(4)
 
     except Exception as e:
         print(e)
 
-print(
-    f"Saving {len(posted_articles)} posted articles"
-)
-
+# Save updated history
+print(f"Saving {len(posted_articles)} posted articles")
 with open(POSTED_FILE, "w", encoding="utf-8") as f:
-
     for item in posted_articles:
         f.write(item + "\n")
 
