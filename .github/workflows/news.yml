@@ -2,7 +2,7 @@ name: Daily Briefing
 
 on:
   schedule:
-    - cron: '0 21 * * *'   # 9 PM UTC = 10 PM WAT (Nigeria time)
+    - cron: '0 21 * * *'   # 9 PM UTC = 10 PM Nigeria time
   workflow_dispatch:
 
 concurrency:
@@ -27,10 +27,22 @@ jobs:
       - name: Install Dependencies
         run: pip install -r requirements.txt
 
+      # Debug step – verifies secret is passed (won't expose the value)
+      - name: Debug secret existence
+        run: |
+          if [ -n "$FOOTBALL_DATA_KEY" ]; then
+            echo "✅ FOOTBALL_DATA_KEY is set (length: ${#FOOTBALL_DATA_KEY})"
+          else
+            echo "❌ FOOTBALL_DATA_KEY is NOT set"
+          fi
+        env:
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+
       - name: Run Daily Briefing
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
         run: python daily_briefing.py
 
       - name: Save Briefing State
