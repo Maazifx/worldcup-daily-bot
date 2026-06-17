@@ -5,11 +5,13 @@ import re
 import time
 import random
 import json
-
+import logging
 from io import BytesIO
 from PIL import Image
 
-# No more graphic overlay – we send the raw image directly
+# ------------------ Setup logging ------------------
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
@@ -33,21 +35,10 @@ SOURCE_PRIORITY = [
 ]
 
 WORLD_CUP_KEYWORDS = [
-    "world cup",
-    "fifa world cup",
-    "world cup 2026",
-    "fifa",
-    "world cup qualifier",
-    "world cup qualifying",
-    "qualification",
-    "qualifier",
-    "group stage",
-    "round of 16",
-    "quarter-final",
-    "quarterfinal",
-    "semi-final",
-    "semifinal",
-    "knockout stage",
+    "world cup", "fifa world cup", "world cup 2026", "fifa",
+    "world cup qualifier", "world cup qualifying", "qualification",
+    "qualifier", "group stage", "round of 16", "quarter-final",
+    "quarterfinal", "semi-final", "semifinal", "knockout stage",
     "world cup opener"
 ]
 
@@ -63,7 +54,6 @@ BANNED_WORDS = [
 ]
 
 def get_fallback_image():
-    """Return a high‑resolution fallback background image."""
     backgrounds = [
         "background/1571741257821.jpeg",
         "background/64 qatar.jpg",
@@ -75,10 +65,6 @@ def get_fallback_image():
     return random.choice(backgrounds)
 
 def get_best_image(image_url):
-    """
-    Download the feed image, check resolution (min width 800px),
-    and return the local file path. If fails, return a fallback.
-    """
     if image_url == "BBC_FALLBACK":
         return get_fallback_image()
 
@@ -88,24 +74,22 @@ def get_best_image(image_url):
         if response.status_code != 200:
             return get_fallback_image()
 
-        # Check resolution
         img = Image.open(BytesIO(response.content))
         width, height = img.size
-        if width < 800 or height < 450:   # raise threshold
+        if width < 800 or height < 450:
+            logger.info(f"Image too small ({width}x{height}), using fallback")
             return get_fallback_image()
 
-        # Save the original high‑quality image
+        # Save without recompression (original quality)
         with open("article.jpg", "wb") as f:
             f.write(response.content)
         return "article.jpg"
 
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error downloading image: {e}")
         return get_fallback_image()
 
-
-# ------------------------------------------------------------
-# Load previously posted articles
-# ------------------------------------------------------------
+# ---------- Load posted articles ----------
 if not os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "w", encoding="utf-8"):
         pass
@@ -115,13 +99,20 @@ with open(POSTED_FILE, "r", encoding="utf-8") as f:
 
 new_posts = []
 
-# ------------------------------------------------------------
-# Fetch & filter RSS feeds
-# ------------------------------------------------------------
+# ---------- Fetch & filter feeds ----------
 for source in SOURCE_PRIORITY:
-    feed = feedparser.parse(FEEDS[source])
-    if not hasattr(feed, "entries"):
+    logger.info(f"Processing {source}...")
+    try:
+        feed = feedparser.parse(FEEDS[source], request_headers={"User-Agent": "Mozilla/5.0"})
+    except Exception as e:
+        logger.error(f"Failed to parse {source}: {e}")
         continue
+
+    if not hasattr(feed, "entries") or not feed.entries:
+        logger.warning(f"No entries from {source}")
+        continue
+
+    logger.info(f"Found {len(feed.entries)} entries in {source}")
 
     source_count = 0
     for article in feed.entries[:50]:
@@ -140,7 +131,7 @@ for source in SOURCE_PRIORITY:
         clean_summary = re.sub("<.*?>", "", summary).strip()
         article_text = (title.lower() + " " + clean_summary.lower())
 
-        # ---- football / soccer filter ----
+        # ---- Football filter ----
         football_terms = [
             "football", "soccer", "fifa", "world cup", "goal",
             "manager", "midfielder", "defender", "striker", "national team"
@@ -148,21 +139,17 @@ for source in SOURCE_PRIORITY:
         if not any(term in article_text for term in football_terms):
             continue
 
-        # ---- banned words ----
+        # ---- Banned words ----
         if any(banned in article_text for banned in BANNED_WORDS):
             continue
 
-        # ---- World Cup specific keywords ----
+        # ---- World Cup keywords ----
         keyword_match = any(kw in article_text for kw in WORLD_CUP_KEYWORDS)
-        url_match = (
-            "world-cup" in link.lower()
-            or "worldcup" in link.lower()
-            or "fifa" in link.lower()
-        )
+        url_match = ("world-cup" in link.lower() or "worldcup" in link.lower() or "fifa" in link.lower())
         if not keyword_match and not url_match:
             continue
 
-        # ---- extract image ----
+        # ---- Extract image ----
         image_url = None
         if hasattr(article, "media_content"):
             try:
@@ -185,14 +172,15 @@ for source in SOURCE_PRIORITY:
             "image": image_url
         })
         source_count += 1
+        logger.info(f"Added article from {source}: {title[:50]}...")
+
+    logger.info(f"Added {source_count} articles from {source}")
 
 if not new_posts:
-    print("No World Cup news found.")
+    logger.info("No World Cup news found.")
     raise SystemExit
 
-# ------------------------------------------------------------
-# Send up to 3 posts (no overlay, pure image + caption)
-# ------------------------------------------------------------
+# ---------- Send posts ----------
 posts_sent = 0
 for post in new_posts:
     if posts_sent >= 3:
@@ -200,6 +188,7 @@ for post in new_posts:
 
     image_file = get_best_image(post["image"])
     if not image_file or not os.path.exists(image_file):
+        logger.warning(f"Could not get image for {post['title']}")
         continue
 
     try:
@@ -213,10 +202,7 @@ for post in new_posts:
 
         reply_markup = {
             "inline_keyboard": [[
-                {
-                    "text": "📰 Read Full Story",
-                    "url": post["link"]
-                }
+                {"text": "📰 Read Full Story", "url": post["link"]}
             ]]
         }
 
@@ -234,21 +220,19 @@ for post in new_posts:
         if response.status_code == 200:
             posts_sent += 1
             posted_articles.add(post["link"])
-            print(f"Posted: {post['title']}")
+            logger.info(f"Posted: {post['title']}")
         else:
-            print(f"Failed to post: {response.status_code}")
+            logger.error(f"Failed to post: {response.text}")
 
-        time.sleep(4)   # avoid rate limits
+        time.sleep(4)
 
     except Exception as e:
-        print(f"Error posting: {e}")
+        logger.error(f"Error posting: {e}")
 
-# ------------------------------------------------------------
-# Save updated history
-# ------------------------------------------------------------
-print(f"Saving {len(posted_articles)} posted articles")
+# ---------- Save state ----------
+logger.info(f"Saving {len(posted_articles)} posted articles")
 with open(POSTED_FILE, "w", encoding="utf-8") as f:
     for item in posted_articles:
         f.write(item + "\n")
 
-print(f"Posted {posts_sent} World Cup articles.")
+logger.info(f"Posted {posts_sent} World Cup articles.")
