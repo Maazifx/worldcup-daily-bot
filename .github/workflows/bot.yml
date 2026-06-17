@@ -40,7 +40,7 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
 
-          git add posted_articles.txt
+          git add worldcup_posted_articles.txt
 
           if ! git diff --staged --quiet; then
             git commit -m "Update World Cup history"
