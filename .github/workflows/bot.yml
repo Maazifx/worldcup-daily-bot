@@ -1,160 +1,122 @@
 name: Football News Bot
 
 on:
-  schedule:
-    - cron: "0 */2 * * *"
-  workflow_dispatch:
+schedule:
+- cron: "0 */2 * * *"
+workflow_dispatch:
 
 jobs:
 
-  news:
-    runs-on: ubuntu-latest
+worldcup:
+runs-on: ubuntu-latest
 
-    permissions:
-      contents: write
+permissions:
+  contents: write
 
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v5
+steps:
+  - name: Checkout Repository
+    uses: actions/checkout@v5
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
+  - name: Setup Python
+    uses: actions/setup-python@v6
+    with:
+      python-version: "3.11"
 
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
+  - name: Install Dependencies
+    run: pip install -r requirements.txt
 
-      - name: Run News Bot
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python main.py
+  - name: Run World Cup Updates
+    env:
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+    run: python worldcup_updates.py
 
-      - name: Save News History
-        continue-on-error: true
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
+  - name: Save World Cup History
+    continue-on-error: true
+    run: |
+      git config --global user.name "github-actions"
+      git config --global user.email "actions@github.com"
 
-          git add posted_articles.txt
+      git add posted_articles.txt
 
-          if ! git diff --staged --quiet; then
-            git commit -m "Update news history"
-            git pull --rebase origin main || true
-            git push origin HEAD:main || true
-          fi
+      if ! git diff --staged --quiet; then
+        git commit -m "Update World Cup history"
+        git pull --rebase origin main || true
+        git push origin HEAD:main || true
+      fi
 
-  worldcup:
-    runs-on: ubuntu-latest
+fixtures:
+runs-on: ubuntu-latest
 
-    permissions:
-      contents: write
+permissions:
+  contents: write
 
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v5
+steps:
+  - name: Checkout Repository
+    uses: actions/checkout@v5
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
+  - name: Setup Python
+    uses: actions/setup-python@v6
+    with:
+      python-version: "3.11"
 
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
+  - name: Install Dependencies
+    run: pip install -r requirements.txt
 
-      - name: Run World Cup Updates
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python worldcup_updates.py
+  - name: Run Fixtures Bot
+    env:
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+    run: python daily_fixtures.py
 
-      - name: Save World Cup History
-        continue-on-error: true
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
+  - name: Save Fixture State
+    continue-on-error: true
+    run: |
+      git config --global user.name "github-actions"
+      git config --global user.email "actions@github.com"
 
-          git add posted_articles.txt
+      git add daily_fixtures_state.txt
 
-          if ! git diff --staged --quiet; then
-            git commit -m "Update World Cup history"
-            git pull --rebase origin main || true
-            git push origin HEAD:main || true
-          fi
+      if ! git diff --staged --quiet; then
+        git commit -m "Update fixture state"
+        git pull --rebase origin main || true
+        git push origin HEAD:main || true
+      fi
 
-  fixtures:
-    runs-on: ubuntu-latest
+briefing:
+runs-on: ubuntu-latest
 
-    permissions:
-      contents: write
+permissions:
+  contents: write
 
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v5
+steps:
+  - name: Checkout Repository
+    uses: actions/checkout@v5
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
+  - name: Setup Python
+    uses: actions/setup-python@v6
+    with:
+      python-version: "3.11"
 
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
+  - name: Install Dependencies
+    run: pip install -r requirements.txt
 
-      - name: Run Fixtures Bot
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python daily_fixtures.py
+  - name: Run Daily Briefing
+    env:
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+    run: python daily_briefing.py
 
-      - name: Save Fixture State
-        continue-on-error: true
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
+  - name: Save Briefing State
+    continue-on-error: true
+    run: |
+      git config --global user.name "github-actions"
+      git config --global user.email "actions@github.com"
 
-          git add daily_fixtures_state.txt
+      git add daily_briefing_state.txt
 
-          if ! git diff --staged --quiet; then
-            git commit -m "Update fixture state"
-            git pull --rebase origin main || true
-            git push origin HEAD:main || true
-          fi
-
-  briefing:
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v5
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run Daily Briefing
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python daily_briefing.py
-
-      - name: Save Briefing State
-        continue-on-error: true
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-
-          git add daily_briefing_state.txt
-
-          if ! git diff --staged --quiet; then
-            git commit -m "Update briefing state"
-            git pull --rebase origin main || true
-            git push origin HEAD:main || true
-          fi
+      if ! git diff --staged --quiet; then
+        git commit -m "Update briefing state"
+        git pull --rebase origin main || true
+        git push origin HEAD:main || true
+      fi
