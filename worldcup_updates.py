@@ -34,47 +34,21 @@ SOURCE_PRIORITY = [
 
 WORLD_CUP_KEYWORDS = [
     "world cup",
-    "fifa",
     "fifa world cup",
     "world cup 2026",
-    "usa 2026",
-    "canada 2026",
-    "mexico 2026",
-    "qualification",
-    "qualifier",
+    "fifa",
     "world cup qualifier",
     "world cup qualifying",
+    "qualification",
+    "qualifier",
     "group stage",
     "round of 16",
     "quarter-final",
     "quarterfinal",
     "semi-final",
     "semifinal",
-    "final",
-    "knockout",
-    "international",
-    "national team",
-    "argentina",
-    "brazil",
-    "england",
-    "france",
-    "germany",
-    "spain",
-    "portugal",
-    "netherlands",
-    "belgium",
-    "croatia",
-    "morocco",
-    "usa",
-    "mexico",
-    "canada",
-    "scotland",
-    "australia",
-    "japan",
-    "ecuador",
-    "tunisia",
-    "ivory coast",
-    "turkiye"
+    "knockout stage",
+    "world cup opener"
 ]
 
 BANNED_WORDS = [
@@ -107,6 +81,17 @@ BANNED_WORDS = [
     "kit leaked",
     "home kit",
     "away kit",
+    "ashes",
+ "test match",
+"one day international",
+"odi",
+"t20",
+"county championship",
+"premiership rugby",
+"six nations",
+"wimbledon",
+"atp",
+"wta"
     "third kit",
     "jersey leak"
 ]
@@ -209,6 +194,24 @@ for source in SOURCE_PRIORITY:
             + " "
             + clean_summary.lower()
         )
+        football_terms = [
+    "football",
+    "soccer",
+    "fifa",
+    "world cup",
+    "goal",
+    "manager",
+    "midfielder",
+    "defender",
+    "striker",
+    "national team"
+]
+
+if not any(
+    term in article_text
+    for term in football_terms
+):
+    continue
 
         if any(
             banned in article_text
@@ -216,11 +219,19 @@ for source in SOURCE_PRIORITY:
         ):
             continue
 
-        if not any(
-            keyword in article_text
-            for keyword in WORLD_CUP_KEYWORDS
-        ):
-            continue
+        keyword_match = any(
+    keyword in article_text
+    for keyword in WORLD_CUP_KEYWORDS
+)
+
+url_match = (
+    "world-cup" in link.lower()
+    or "worldcup" in link.lower()
+    or "fifa" in link.lower()
+)
+
+if not keyword_match and not url_match:
+    continue
 
         image_url = None
 
