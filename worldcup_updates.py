@@ -136,7 +136,13 @@ if not os.path.exists(POSTED_FILE):
         pass
 
 with open(POSTED_FILE, "r", encoding="utf-8") as f:
-    posted_articles = set(line.strip() for line in f if line.strip())
+    posted_articles = set(
+        line.strip()
+        for line in f
+        if line.strip()
+    )
+
+print(f"Loaded {len(posted_articles)} posted articles")
 
 new_posts = []
 
