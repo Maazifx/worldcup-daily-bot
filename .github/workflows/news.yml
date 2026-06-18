@@ -27,22 +27,26 @@ jobs:
       - name: Install Dependencies
         run: pip install -r requirements.txt
 
-      # Debug step – verifies secret is passed (won't expose the value)
+      # Debug step – confirms secret exists
       - name: Debug secret existence
         run: |
           if [ -n "$FOOTBALL_DATA_KEY" ]; then
             echo "✅ FOOTBALL_DATA_KEY is set (length: ${#FOOTBALL_DATA_KEY})"
+          elif [ -n "$FOOTBALLDATAKEY" ]; then
+            echo "✅ FOOTBALLDATAKEY is set (length: ${#FOOTBALLDATAKEY})"
           else
-            echo "❌ FOOTBALL_DATA_KEY is NOT set"
+            echo "❌ Neither secret is set"
           fi
         env:
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          FOOTBALLDATAKEY: ${{ secrets.FOOTBALLDATAKEY }}
 
       - name: Run Daily Briefing
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          FOOTBALLDATAKEY: ${{ secrets.FOOTBALLDATAKEY }}
         run: python daily_briefing.py
 
       - name: Save Briefing State
