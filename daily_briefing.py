@@ -6,6 +6,7 @@ import sys
 import re
 import feedparser
 import urllib3
+from zoneinfo import ZoneInfo # Python 3.9+
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -52,9 +53,11 @@ def get_flag(country):
 
 def utc_to_wat(utc_time_str):
     try:
-        hour, minute = map(int, utc_time_str.split(":"))
-        hour = (hour + 1) % 24
-        return f"{hour:02d}:{minute:02d} WAT"
+        if ":" not in utc_time_str:
+            return utc_time_str
+        dt_utc = datetime.datetime.strptime(utc_time_str, "%H:%M").replace(tzinfo=ZoneInfo("UTC"))
+        dt_wat = dt_utc.astimezone(ZoneInfo("Africa/Lagos"))
+        return f"{dt_wat.strftime('%H:%M')} WAT"
     except:
         return utc_time_str
 
@@ -64,154 +67,105 @@ WC_API_BASE = "https://worldcup26.ir"
 def get_today_matches():
     try:
         resp = requests.get(f"{WC_API_BASE}/get/games", timeout=15, verify=False)
-        if resp.status_code != 200:
+        if resp.status_code!= 200:
             return []
         data = resp.json()
-        today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.datetime.now(ZoneInfo("Africa/Lagos")).strftime("%Y-%m-%d")
         all_games = data.get("games", [])
         today_matches = []
         for g in all_games:
             local_date = g.get("local_date", "")
-            if today in local_date or local_date.replace('/', '-')[:10] == today:
+            if today in local_date:
                 today_matches.append(g)
         return today_matches
     except Exception as e:
         logger.warning(f"API failed: {e}")
         return []
 
-def get_standings():
-    try:
-        resp = requests.get(f"{WC_API_BASE}/get/groups", timeout=10, verify=False)
-        if resp.status_code == 200:
-            return resp.json()
-        return []
-    except Exception as e:
-        logger.warning(f"Standings failed: {e}")
-        return []
-
-# ---------- RSS FALLBACK (IMPROVED) ----------
+# ---------- RSS SOURCES - ACCURATE MATCH DATA ----------
 RSS_FEEDS = {
+    "Flashscore": "https://www.flashscore.com/rss/livescore.xml", # Best for live scores + FT
     "BBC Sport": "https://feeds.bbci.co.uk/sport/football/rss.xml",
     "Sky Sports": "https://www.skysports.com/rss/12040",
-    "Guardian": "https://www.theguardian.com/football/rss",
 }
 
-def fetch_articles_from_feed(url):
+def fetch_rss_entries(url):
     try:
         feed = feedparser.parse(url, request_headers={"User-Agent": "Mozilla/5.0"})
-        return feed.entries[:30]
+        return feed.entries[:50]
     except Exception as e:
         logger.error(f"RSS failed for {url}: {e}")
         return []
 
-def is_valid_team(name):
-    return name in WORLD_CUP_TEAMS
+def normalize_team(name):
+    name = name.strip()
+    fixes = {"USA": "USA", "South Korea": "South Korea", "Ivory Coast": "Ivory Coast",
+             "Czech Republic": "Czechia", "Turkey": "Turkiye"}
+    return fixes.get(name, name)
 
-def extract_match_info(text):
-    # Pattern 1: Team A 2-1 Team B
-    pattern1 = r'([A-Za-z ]+)\s+(\d+)\s*[-:;]\s*(\d+)\s+([A-Za-z ]+)'
-    matches = re.findall(pattern1, text, re.IGNORECASE)
-    for home, hg, ag, away in matches:
-        home = home.strip()
-        away = away.strip()
-        if is_valid_team(home) and is_valid_team(away):
-            return (home, away, f"{hg}-{ag}", None)
-    
-    # Pattern 2: Team A beat Team B 2-1
-    pattern2 = r'([A-Za-z ]+)\s+(?:beat|wins?|defeat|draws? with)\s+([A-Za-z ]+)\s+(\d+)\s*[-:]\s*(\d+)'
+def parse_match_from_text(text):
+    text = re.sub(r'<[^>]+>', ' ', text) # strip HTML
+
+    # Pattern 1: Team 2-1 Team FT / 67' / LIVE
+    pattern = r'([A-Za-z\s\.]+?)\s+(\d+)[-:]\s*(\d+)\s+([A-Za-z\s\.]+?)\s*(FT|LIVE|HT|(\d+)\'|Penalty)?'
+    matches = re.findall(pattern, text, re.IGNORECASE)
+
+    for home, hg, ag, away, status, minute, _ in matches:
+        home = normalize_team(home.strip())
+        away = normalize_team(away.strip())
+        if home in WORLD_CUP_TEAMS and away in WORLD_CUP_TEAMS:
+            score = f"{hg}-{ag}"
+            return {"home": home, "away": away, "score": score, "status": status.strip() if status else None}
+
+    # Pattern 2: Team vs Team 14:00 kickoff
+    pattern2 = r'([A-Za-z\s\.]+?)\s+v[s]?\.\s+([A-Za-z\s\.]+?)\s+(\d{1,2}:\d{2})'
     matches2 = re.findall(pattern2, text, re.IGNORECASE)
-    for home, away, hg, ag in matches2:
-        home = home.strip()
-        away = away.strip()
-        if is_valid_team(home) and is_valid_team(away):
-            return (home, away, f"{hg}-{ag}", None)
-    
-    # Pattern 3: Team A vs Team B
-    pattern3 = r'([A-Za-z ]+)\s+v(?:s)?\.?\s+([A-Za-z ]+)'
-    matches3 = re.findall(pattern3, text, re.IGNORECASE)
-    for home, away in matches3:
-        home = home.strip()
-        away = away.strip()
-        if is_valid_team(home) and is_valid_team(away):
-            time_match = re.search(r'(\d{1,2}):(\d{2})', text)
-            time_str = f"{time_match.group(1)}:{time_match.group(2)}" if time_match else None
-            return (home, away, None, time_str)
-    
-    return (None, None, None, None)
+    for home, away, time_str in matches2:
+        home = normalize_team(home.strip())
+        away = normalize_team(away.strip())
+        if home in WORLD_CUP_TEAMS and away in WORLD_CUP_TEAMS:
+            return {"home": home, "away": away, "score": None, "time": time_str, "status": "upcoming"}
 
-def is_live(text):
-    return any(kw in text.lower() for kw in ["live", "minute", "half-time", "updates", "now"])
+    return None
 
-def is_finished(text):
-    return any(kw in text.lower() for kw in ["full-time", "result", "final", "wins", "beat", "defeat", "draw"])
-
-def build_from_rss():
-    all_articles = []
-    for source, url in RSS_FEEDS.items():
-        entries = fetch_articles_from_feed(url)
-        for e in entries:
-            title = getattr(e, "title", "").strip()
-            summary = getattr(e, "summary", "").strip()
-            summary = re.sub("<.*?>", "", summary)
-            if title:
-                all_articles.append({"title": title, "summary": summary, "source": source})
-    
-    if not all_articles:
-        return {"results": [], "live": [], "upcoming": []}
-    
-    seen = set()
+def get_today_from_rss():
+    today_wat = datetime.datetime.now(ZoneInfo("Africa/Lagos")).strftime("%Y-%m-%d")
     results, live, upcoming = [], [], []
-    for art in all_articles:
-        text = art["title"] + " " + art["summary"]
-        home, away, score, time_str = extract_match_info(text)
-        if not home or not away:
-            continue
-        key = f"{home}_{away}_{score}"
-        if key in seen:
-            continue
-        seen.add(key)
-        
-        entry = {"home": home, "away": away, "score": score, "time": time_str, "source": art["source"]}
-        if score and is_finished(text):
-            results.append(entry)
-        elif is_live(text):
-            live.append(entry)
-        else:
-            upcoming.append(entry)
-    
-    def dedup(lst):
-        seen2 = set()
-        out = []
-        for item in lst:
-            k = f"{item['home']}_{item['away']}"
-            if k not in seen2:
-                seen2.add(k)
-                out.append(item)
-        return out
-    
-    return {"results": dedup(results), "live": dedup(live), "upcoming": dedup(upcoming)}
+    seen = set()
 
-# ---------- FALLBACK FIXTURES (KNOWN SCHEDULE) ----------
-# This is the actual World Cup 2026 group stage schedule (June 2026)
-# You can expand this as needed
-FALLBACK_FIXTURES = [
-    {"date": "2026-06-19", "home": "Mexico", "away": "South Korea", "time": "14:00"},
-    {"date": "2026-06-19", "home": "Czechia", "away": "South Africa", "time": "17:00"},
-    {"date": "2026-06-20", "home": "Switzerland", "away": "Bosnia", "time": "14:00"},
-    {"date": "2026-06-20", "home": "Canada", "away": "Qatar", "time": "17:00"},
-    {"date": "2026-06-21", "home": "Scotland", "away": "Haiti", "time": "14:00"},
-    {"date": "2026-06-21", "home": "Brazil", "away": "Morocco", "time": "17:00"},
-]
+    for source, url in RSS_FEEDS.items():
+        entries = fetch_rss_entries(url)
+        for entry in entries:
+            title = getattr(entry, "title", "")
+            summary = getattr(entry, "summary", "")
+            published = getattr(entry, "published", "")
 
-def get_fallback_fixtures():
-    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-    upcoming = []
-    for fixture in FALLBACK_FIXTURES:
-        if fixture["date"] == today:
-            upcoming.append(fixture)
-        elif fixture["date"] > today and len(upcoming) < 3:
-            upcoming.append(fixture)
-    return upcoming
+            # Filter to today only
+            if published and today_wat not in published:
+                continue
+
+            text = title + " + summary
+            match = parse_match_from_text(text)
+            if not match:
+                continue
+
+            key = f"{match['home']}_{match['away']}"
+            if key in seen:
+                continue
+            seen.add(key)
+
+            status = match.get("status", "").lower()
+            if "ft" in status or "final" in text.lower():
+                results.append({"home": match["home"], "away": match["away"], "score": match["score"], "source": source})
+            elif "live" in status or re.search(r'\d+\'', status):
+                live.append({"home": match["home"], "away": match["away"], "score": match["score"], "minute": status, "source": source})
+            else:
+                time_str = match.get("time")
+                if time_str:
+                    time_str = utc_to_wat(time_str)
+                upcoming.append({"home": match["home"], "away": match["away"], "time": time_str, "source": source})
+
+    return {"results": results[:8], "live": live[:5], "upcoming": upcoming[:8]}
 
 # ---------- FORMATTING ----------
 def format_match_line(home, away, score=None, time=None, extra=""):
@@ -222,9 +176,9 @@ def format_match_line(home, away, score=None, time=None, extra=""):
     return f"{flag_home} {home}{score_part} {flag_away} {away}{time_part}{extra}"
 
 def build_briefing():
-    today = datetime.datetime.utcnow()
-    today_str = today.strftime("%d %B %Y")
-    time_wat = utc_to_wat(today.strftime("%H:%M"))
+    now_wat = datetime.datetime.now(ZoneInfo("Africa/Lagos"))
+    today_str = now_wat.strftime("%d %B %Y")
+    time_wat = now_wat.strftime("%H:%M WAT")
 
     lines = [
         "🌎 **FIFA WORLD CUP 2026 DAILY BRIEFING**",
@@ -234,135 +188,78 @@ def build_briefing():
         "━━━━━━━━━━━━━━"
     ]
 
-    # Try primary API
+    # 1. Try primary API first
     matches = get_today_matches()
+    data_source = "API"
+
     if matches:
         completed = [m for m in matches if m.get("finished") == "TRUE"]
-        live_now = [m for m in matches if m.get("finished") != "TRUE" and m.get("status") == "live"]
-        upcoming = [m for m in matches if m.get("finished") != "TRUE" and m.get("status") != "live"]
+        live_now = [m for m in matches if m.get("status") == "live"]
+        upcoming = [m for m in matches if m.get("finished")!= "TRUE" and m.get("status")!= "live"]
+    else:
+        # 2. Fallback to RSS for accurate results + live
+        logger.info("API empty, switching to RSS")
+        rss_data = get_today_from_rss()
+        completed = rss_data["results"]
+        live_now = rss_data["live"]
+        upcoming = rss_data["upcoming"]
+        data_source = "RSS"
 
-        if completed:
-            lines.append("🏁 **RESULTS**")
-            for m in completed[:5]:
+    if completed:
+        lines.append("🏁 **RESULTS**")
+        for m in completed[:6]:
+            if data_source == "API":
                 home = m.get("home_team_name_en", "TBD")
                 away = m.get("away_team_name_en", "TBD")
                 hg = m.get("home_score", 0)
                 ag = m.get("away_score", 0)
                 lines.append(format_match_line(home, away, score=f"{hg}-{ag}"))
-            lines.append("━━━━━━━━━━━━━━")
-        
-        if live_now:
-            lines.append("🔴 **LIVE NOW**")
-            for m in live_now[:3]:
+            else:
+                lines.append(format_match_line(m["home"], m["away"], score=m["score"]))
+        lines.append("━━━━━━━━━━━━━━")
+
+    if live_now:
+        lines.append("🔴 **LIVE NOW**")
+        for m in live_now[:4]:
+            if data_source == "API":
                 home = m.get("home_team_name_en", "TBD")
                 away = m.get("away_team_name_en", "TBD")
                 hg = m.get("home_score", 0)
                 ag = m.get("away_score", 0)
                 minute = m.get("minute", "")
-                lines.append(format_match_line(home, away, score=f"{hg}-{ag}", extra=f" ({minute}')"))
-            lines.append("━━━━━━━━━━━━━━")
-        
-        if upcoming:
-            lines.append("📅 **TODAY'S FIXTURES**")
-            for m in upcoming[:5]:
+                extra = f" ({minute}')" if minute else " (LIVE)"
+                lines.append(format_match_line(home, away, score=f"{hg}-{ag}", extra=extra))
+            else:
+                minute = m.get("minute", "LIVE")
+                lines.append(format_match_line(m["home"], m["away"], score=m["score"], extra=f" ({minute})"))
+        lines.append("━━━━━━━━━━━━━━")
+
+    if upcoming:
+        lines.append("📅 **UPCOMING TODAY**")
+        for m in upcoming[:6]:
+            if data_source == "API":
                 home = m.get("home_team_name_en", "TBD")
                 away = m.get("away_team_name_en", "TBD")
-                time_str = m.get("local_date", "")
-                if " " in time_str:
-                    time_part = time_str.split(" ")[-1]
-                    time_part = utc_to_wat(time_part)
-                else:
-                    time_part = ""
-                lines.append(format_match_line(home, away, time=time_part))
-            lines.append("━━━━━━━━━━━━━━")
-        
-        if upcoming:
-            m = upcoming[0]
-            home = m.get("home_team_name_en", "TBD")
-            away = m.get("away_team_name_en", "TBD")
-            lines.append("⭐ **MATCH TO WATCH**")
-            lines.append(format_match_line(home, away))
-            lines.append("")
-            lines.append(f"A victory would move {home} closer to the Round of 16 while {away} look to pull off an upset.")
-            lines.append("━━━━━━━━━━━━━━")
-        
-        lines.append("🏆 **FIFA WORLD CUP 2026**")
-        lines.append("📲 @wcupdates2026")
-        return "\n".join(lines)
+                time_str = m.get("local_date", "").split(" ")[-1] if " in m.get("local_date", "") else ""
+                time_str = utc_to_wat(time_str) if time_str else ""
+                lines.append(format_match_line(home, away, time=time_str))
+            else:
+                lines.append(format_match_line(m["home"], m["away"], time=m.get("time")))
+        lines.append("━━━━━━━━━━━━━━")
 
-    # Fallback to RSS
-    logger.info("API returned no matches, falling back to RSS")
-    data = build_from_rss()
-    results = data.get("results", [])
-    live = data.get("live", [])
-    upcoming = data.get("upcoming", [])
+    if not completed and not live_now and not upcoming:
+        lines.append("No World Cup 2026 matches scheduled for today.")
 
-    # If RSS didn't find enough, use fallback fixtures
-    if not results and not live and not upcoming:
-        logger.info("RSS found no matches, using fallback fixtures")
-        fallback = get_fallback_fixtures()
-        if fallback:
-            lines.append("📅 **TODAY'S FIXTURES**")
-            for f in fallback[:5]:
-                home = f["home"]
-                away = f["away"]
-                time_part = utc_to_wat(f["time"]) if f.get("time") else ""
-                lines.append(format_match_line(home, away, time=time_part))
-            lines.append("━━━━━━━━━━━━━━")
-            if fallback:
-                f = fallback[0]
-                lines.append("⭐ **MATCH TO WATCH**")
-                lines.append(format_match_line(f["home"], f["away"]))
-                lines.append("")
-                lines.append(f"A victory would move {f['home']} closer to the Round of 16 while {f['away']} look to pull off an upset.")
-                lines.append("━━━━━━━━━━━━━━")
-            lines.append("⚽ *Schedule based on official World Cup 2026 fixtures.*")
-        else:
-            lines.append("No matches scheduled for today.")
-            lines.append("")
-            lines.append("📅 **UPCOMING WORLD CUP FIXTURES:**")
-            lines.append("• June 19: Group A & B matches")
-            lines.append("• June 20: Group C & D matches")
-            lines.append("• June 21: Group E & F matches")
-            lines.append("• June 22: Group G & H matches")
-            lines.append("━━━━━━━━━━━━━━")
-    else:
-        if results:
-            lines.append("🏁 **RESULTS**")
-            for r in results[:5]:
-                lines.append(format_match_line(r["home"], r["away"], score=r["score"]))
-            lines.append("━━━━━━━━━━━━━━")
-        if live:
-            lines.append("🔴 **LIVE NOW**")
-            for l in live[:3]:
-                lines.append(format_match_line(l["home"], l["away"], extra=" (LIVE)"))
-            lines.append("━━━━━━━━━━━━━━")
-        if upcoming:
-            lines.append("📅 **TODAY'S FIXTURES**")
-            for u in upcoming[:5]:
-                time_part = u["time"] if u["time"] else ""
-                if time_part:
-                    time_part = utc_to_wat(time_part)
-                lines.append(format_match_line(u["home"], u["away"], time=time_part))
-            lines.append("━━━━━━━━━━━━━━")
-        if upcoming:
-            u = upcoming[0]
-            lines.append("⭐ **MATCH TO WATCH**")
-            lines.append(format_match_line(u["home"], u["away"]))
-            lines.append("")
-            lines.append(f"A victory would move {u['home']} closer to the Round of 16 while {u['away']} look to pull off an upset.")
-            lines.append("━━━━━━━━━━━━━━")
-        
-        lines.append("⚽ *Data sourced from BBC, Sky, and Guardian RSS feeds.*")
-
+    lines.append(f"⚽ *Data source: {data_source}*")
     lines.append("🏆 **FIFA WORLD CUP 2026**")
     lines.append("📲 @wcupdates2026")
     return "\n".join(lines)
 
 def send_briefing():
+    today_wat = datetime.datetime.now(ZoneInfo("Africa/Lagos")).strftime("%Y-%m-%d")
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r") as f:
-            if f.read().strip() == datetime.datetime.utcnow().strftime("%Y-%m-%d"):
+            if f.read().strip() == today_wat:
                 logger.info("Already sent today – skipping.")
                 return
 
@@ -379,11 +276,11 @@ def send_briefing():
         "disable_web_page_preview": True
     }
     try:
-        resp = requests.post(url, json=payload)
+        resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code == 200:
             logger.info("✅ Briefing sent successfully!")
             with open(STATE_FILE, "w") as f:
-                f.write(datetime.datetime.utcnow().strftime("%Y-%m-%d"))
+                f.write(today_wat)
         else:
             logger.error(f"Telegram failed: {resp.text}")
     except Exception as e:
