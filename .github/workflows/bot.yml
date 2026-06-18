@@ -2,7 +2,7 @@ name: World Cup News
 
 on:
   schedule:
-    - cron: '0 * * * *'   # every hour at minute 0
+    - cron: '0 * * * *'   # every hour
   workflow_dispatch:
 
 concurrency:
@@ -39,7 +39,7 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
 
-          git add worldcup_posted_articles.txt
+          git add worldcup_posted_articles.json
 
           if ! git diff --staged --quiet; then
             git commit -m "Update World Cup history"
