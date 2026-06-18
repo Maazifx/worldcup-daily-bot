@@ -38,14 +38,11 @@ REQUIRED_TERMS = [
 ]
 
 EXCLUDE_TERMS = [
-    # Women's football
     "women's", "woman", "female", "lionesses", "wsl",
     "super league", "sarina wiegman", "wiegman",
     "euro 2025", "euro 2026", "u17", "u20", "u23",
     "youth", "paralympic", "olympic", "futsal", "beach soccer",
-    # 2027 Women's World Cup
     "2027 world cup", "world cup 2027", "2027 women's",
-    # Promotional / non-news
     "predictor", "game", "quiz", "competition", "prize", "signed",
     "how to play", "final whistle", "round score"
 ]
@@ -194,7 +191,6 @@ def is_men_world_cup_article(title, summary, link):
     text = (title + " " + summary).lower()
     link_lower = link.lower()
 
-    # Block women's, 2027, promotional
     if any(excl in text for excl in EXCLUDE_TERMS):
         logger.debug(f"Excluded (EXCLUDE_TERMS): {title[:50]}")
         return False
@@ -203,14 +199,12 @@ def is_men_world_cup_article(title, summary, link):
         logger.debug(f"Excluded (2027 World Cup): {title[:50]}")
         return False
 
-    # Must contain required terms
     if not any(req in text for req in REQUIRED_TERMS):
         if not ("world-cup" in link_lower or "worldcup" in link_lower or "fifa" in link_lower):
             return False
         if "world cup" not in text and "worldcup" not in text:
             return False
 
-    # Extra check: ensure not women's
     women_terms = ["women", "woman", "female", "lionesses", "wiegman", "2027"]
     if any(term in text for term in women_terms):
         return False
@@ -266,6 +260,7 @@ def main():
 
             title_hash = get_title_hash(title)
             if link in posted_links or title_hash in posted_hashes:
+                logger.debug(f"Skipping duplicate: {title[:50]}")
                 continue
 
             clean_summary = re.sub("<.*?>", "", summary).strip()
@@ -335,12 +330,16 @@ def main():
                 posted_links.add(post["link"])
                 posted_hashes.add(post["title_hash"])
                 logger.info(f"Posted: {post['title']}")
+                
+                # ✅ SAVE IMMEDIATELY AFTER EACH POST
+                save_posted_state(posted_links, posted_hashes)
             else:
                 logger.error(f"Failed to post: {resp.text}")
             time.sleep(4)
         except Exception as e:
             logger.error(f"Error posting: {e}")
 
+    # Final save (in case something was posted but not saved)
     if posts_sent > 0:
         save_posted_state(posted_links, posted_hashes)
     logger.info(f"Posted {posts_sent} new World Cup articles.")
