@@ -1,6 +1,14 @@
-import feedparser, requests, os, re, time, random, json, logging
+import feedparser
+import requests
+import os
+import re
+import time
+import random
+import json
+import logging
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
+from bs4 import BeautifulSoup
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -19,35 +27,153 @@ FEEDS = {
 
 SOURCE_PRIORITY = ["BBC Sport", "Sky Sports", "ESPN FC", "The Guardian", "90Min"]
 
-# Relaxed keywords – accept any article about football (not just World Cup)
 FOOTBALL_TERMS = ["football", "soccer", "fifa", "world cup", "goal", "manager", "midfielder", "defender", "striker"]
-# Remove banned words that might block legitimate articles
 BANNED_WORDS = ["darts", "rugby", "cricket", "golf", "tennis", "formula 1", "f1", "motogp", "boxing", "ufc", "mma", "snooker", "basketball", "nba", "nfl", "baseball", "mlb", "horse racing", "cycling", "podcast", "audio", "betting", "odds", "transfer rumours", "transfer rumor", "kit leaked", "home kit", "away kit", "ashes", "test match", "one day international", "odi", "t20", "county championship", "premiership rugby", "six nations", "wimbledon", "atp", "wta", "third kit", "jersey leak"]
-# World Cup keywords – relaxed: accept any mention of "world cup" or "fifa"
 WORLD_CUP_KEYWORDS = ["world cup", "fifa world cup", "world cup 2026", "fifa"]
 
-def get_fallback_image():
-    backgrounds = ["background/1571741257821.jpeg", "background/64 qatar.jpg", "background/WC.jpg.webp", "background/gettyimages-1127374662-612x612.jpg", "background/gettyimages-1775210084-612x612.jpg", "background/gettyimages-469569148-612x612.jpg"]
-    return random.choice(backgrounds)
+# ----------------------------------------------------------------------
+# Helper: create a placeholder image (only as last resort)
+# ----------------------------------------------------------------------
+def create_placeholder_image(text="World Cup News"):
+    img = Image.new('RGB', (1200, 800), color=(30, 30, 50))
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 60)
+    except:
+        font = ImageFont.load_default()
+    text_bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = text_bbox[2] - text_bbox[0]
+    text_height = text_bbox[3] - text_bbox[1]
+    x = (1200 - text_width) // 2
+    y = (800 - text_height) // 2
+    draw.text((x, y), text, fill=(255, 255, 255), font=font)
+    subtext = "FIFA World Cup 2026"
+    try:
+        font2 = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 30)
+    except:
+        font2 = ImageFont.load_default()
+    draw.text((x, y + 100), subtext, fill=(200, 200, 200), font=font2)
+    filename = "placeholder.jpg"
+    img.save(filename, "JPEG", quality=85)
+    return filename
 
-def get_best_image(image_url):
-    if image_url == "BBC_FALLBACK":
-        return get_fallback_image()
+# ----------------------------------------------------------------------
+# Scrape the article page to find the best image
+# ----------------------------------------------------------------------
+def scrape_article_image(article_url):
+    """
+    Fetch the article HTML and extract the Open Graph image (og:image) or the first large image.
+    Returns a URL string or None.
+    """
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(image_url, headers=headers, timeout=20)
+        resp = requests.get(article_url, headers=headers, timeout=15)
         if resp.status_code != 200:
-            return get_fallback_image()
-        img = Image.open(BytesIO(resp.content))
-        width, height = img.size
-        if width < 800 or height < 450:
-            return get_fallback_image()
-        with open("article.jpg", "wb") as f:
-            f.write(resp.content)
-        return "article.jpg"
-    except Exception:
-        return get_fallback_image()
+            logger.debug(f"Could not fetch article page: {article_url}")
+            return None
+        soup = BeautifulSoup(resp.text, 'lxml')
+        # 1. Look for Open Graph image
+        og_tag = soup.find('meta', property='og:image')
+        if og_tag and og_tag.get('content'):
+            image_url = og_tag['content']
+            if image_url.startswith('//'):
+                image_url = 'https:' + image_url
+            elif image_url.startswith('/'):
+                # relative – prepend domain (simplistic)
+                from urllib.parse import urlparse
+                parsed = urlparse(article_url)
+                base = f"{parsed.scheme}://{parsed.netloc}"
+                image_url = base + image_url
+            return image_url
+        # 2. Look for Twitter card image
+        twitter_tag = soup.find('meta', attrs={'name': 'twitter:image'})
+        if twitter_tag and twitter_tag.get('content'):
+            return twitter_tag['content']
+        # 3. Find the first <img> that is large enough (width > 400)
+        images = soup.find_all('img')
+        for img in images:
+            src = img.get('src')
+            if not src:
+                continue
+            # Check width attribute if present
+            width = img.get('width')
+            if width and int(width) > 400:
+                if src.startswith('//'):
+                    src = 'https:' + src
+                elif src.startswith('/'):
+                    from urllib.parse import urlparse
+                    parsed = urlparse(article_url)
+                    base = f"{parsed.scheme}://{parsed.netloc}"
+                    src = base + src
+                return src
+        # If we have any image, take the first one (but might be small)
+        if images:
+            src = images[0].get('src')
+            if src:
+                if src.startswith('//'):
+                    src = 'https:' + src
+                elif src.startswith('/'):
+                    from urllib.parse import urlparse
+                    parsed = urlparse(article_url)
+                    base = f"{parsed.scheme}://{parsed.netloc}"
+                    src = base + src
+                return src
+        return None
+    except Exception as e:
+        logger.debug(f"Scraping error for {article_url}: {e}")
+        return None
 
+# ----------------------------------------------------------------------
+# Get the best image for an article
+# ----------------------------------------------------------------------
+def get_best_image(article_link, feed_image_url):
+    """
+    Try to get image from:
+    1. Scraped article page (best quality)
+    2. RSS feed image (fallback)
+    3. Placeholder (last resort)
+    Always returns a local file path.
+    """
+    # 1. Try scraping the article page
+    scraped_url = scrape_article_image(article_link)
+    if scraped_url:
+        try:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            resp = requests.get(scraped_url, headers=headers, timeout=20)
+            if resp.status_code == 200:
+                img = Image.open(BytesIO(resp.content))
+                width, height = img.size
+                if width >= 800 and height >= 450:
+                    with open("article.jpg", "wb") as f:
+                        f.write(resp.content)
+                    logger.info("Used scraped image from article page.")
+                    return "article.jpg"
+        except Exception as e:
+            logger.debug(f"Scraped image download failed: {e}")
+
+    # 2. Try RSS feed image
+    if feed_image_url and feed_image_url != "BBC_FALLBACK":
+        try:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            resp = requests.get(feed_image_url, headers=headers, timeout=20)
+            if resp.status_code == 200:
+                img = Image.open(BytesIO(resp.content))
+                width, height = img.size
+                if width >= 400:  # lower threshold for RSS thumbnails
+                    with open("article.jpg", "wb") as f:
+                        f.write(resp.content)
+                    logger.info("Used RSS feed image.")
+                    return "article.jpg"
+        except Exception as e:
+            logger.debug(f"RSS image download failed: {e}")
+
+    # 3. Fallback to placeholder
+    logger.info("Using placeholder image.")
+    return create_placeholder_image()
+
+# ----------------------------------------------------------------------
+# Load posted articles, fetch and filter, send
+# ----------------------------------------------------------------------
 if not os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
         pass
@@ -75,50 +201,49 @@ for source in SOURCE_PRIORITY:
             continue
         clean_summary = re.sub("<.*?>", "", summary).strip()
         article_text = (title.lower() + " " + clean_summary.lower())
-        # Check football terms
+
         if not any(term in article_text for term in FOOTBALL_TERMS):
-            logger.debug(f"Skipped (not football): {title[:50]}")
             continue
         if any(banned in article_text for banned in BANNED_WORDS):
-            logger.debug(f"Skipped (banned): {title[:50]}")
             continue
-        # World Cup keywords – accept if any World Cup or FIFA mention
         if not any(kw in article_text for kw in WORLD_CUP_KEYWORDS):
-            # Also check URL
             if not ("world-cup" in link.lower() or "worldcup" in link.lower() or "fifa" in link.lower()):
-                logger.debug(f"Skipped (no WC keyword): {title[:50]}")
                 continue
-        # Extract image
-        image_url = None
+
+        # Get RSS image if any
+        feed_image = None
         if hasattr(article, "media_content"):
-            try: image_url = article.media_content[0]["url"]
+            try: feed_image = article.media_content[0]["url"]
             except: pass
-        if not image_url and hasattr(article, "media_thumbnail"):
-            try: image_url = article.media_thumbnail[0]["url"]
+        if not feed_image and hasattr(article, "media_thumbnail"):
+            try: feed_image = article.media_thumbnail[0]["url"]
             except: pass
-        if not image_url:
-            image_url = "BBC_FALLBACK"
+        if not feed_image:
+            feed_image = "BBC_FALLBACK"
+
         new_posts.append({
             "source": source,
             "title": title,
             "summary": clean_summary[:350],
             "link": link,
-            "image": image_url
+            "feed_image": feed_image
         })
         source_count += 1
         logger.info(f"Found article: {title[:60]}")
 
 if not new_posts:
-    logger.warning("No World Cup news found – check feeds or filters.")
+    logger.warning("No World Cup news found.")
     raise SystemExit
 
 posts_sent = 0
 for post in new_posts:
     if posts_sent >= 3:
         break
-    image_file = get_best_image(post["image"])
-    if not image_file:
+
+    image_file = get_best_image(post["link"], post["feed_image"])
+    if not image_file or not os.path.exists(image_file):
         continue
+
     try:
         caption = (
             f"🚨 BREAKING\n\n"
@@ -128,6 +253,7 @@ for post in new_posts:
             f"📲 @wcupdates2026"
         )
         reply_markup = {"inline_keyboard": [[{"text": "📰 Read Full Story", "url": post["link"]}]]}
+
         with open(image_file, "rb") as img:
             resp = requests.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
@@ -145,6 +271,7 @@ for post in new_posts:
         else:
             logger.error(f"Failed to post: {resp.text}")
         time.sleep(4)
+
     except Exception as e:
         logger.error(f"Error posting: {e}")
 
