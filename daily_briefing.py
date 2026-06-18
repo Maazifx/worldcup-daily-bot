@@ -6,7 +6,7 @@ import sys
 import re
 import feedparser
 import urllib3
-from zoneinfo import ZoneInfo # Python 3.9+
+from zoneinfo import ZoneInfo
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -67,7 +67,7 @@ WC_API_BASE = "https://worldcup26.ir"
 def get_today_matches():
     try:
         resp = requests.get(f"{WC_API_BASE}/get/games", timeout=15, verify=False)
-        if resp.status_code!= 200:
+        if resp.status_code != 200:
             return []
         data = resp.json()
         today = datetime.datetime.now(ZoneInfo("Africa/Lagos")).strftime("%Y-%m-%d")
@@ -82,9 +82,9 @@ def get_today_matches():
         logger.warning(f"API failed: {e}")
         return []
 
-# ---------- RSS SOURCES - ACCURATE MATCH DATA ----------
+# ---------- RSS SOURCES ----------
 RSS_FEEDS = {
-    "Flashscore": "https://www.flashscore.com/rss/livescore.xml", # Best for live scores + FT
+    "Flashscore": "https://www.flashscore.com/rss/livescore.xml",
     "BBC Sport": "https://feeds.bbci.co.uk/sport/football/rss.xml",
     "Sky Sports": "https://www.skysports.com/rss/12040",
 }
@@ -99,23 +99,29 @@ def fetch_rss_entries(url):
 
 def normalize_team(name):
     name = name.strip()
-    fixes = {"USA": "USA", "South Korea": "South Korea", "Ivory Coast": "Ivory Coast",
-             "Czech Republic": "Czechia", "Turkey": "Turkiye"}
+    fixes = {
+        "USA": "USA",
+        "United States": "USA",
+        "South Korea": "South Korea",
+        "Korea Republic": "South Korea",
+        "Czech Republic": "Czechia",
+        "Turkey": "Turkiye",
+        "Congo DR": "DR Congo",
+        "DR Congo": "DR Congo",
+    }
     return fixes.get(name, name)
 
 def parse_match_from_text(text):
-    text = re.sub(r'<[^>]+>', ' ', text) # strip HTML
+    text = re.sub(r'<[^>]+>', ' ', text)  # strip HTML
 
     # Pattern 1: Team 2-1 Team FT / 67' / LIVE
     pattern = r'([A-Za-z\s\.]+?)\s+(\d+)[-:]\s*(\d+)\s+([A-Za-z\s\.]+?)\s*(FT|LIVE|HT|(\d+)\'|Penalty)?'
     matches = re.findall(pattern, text, re.IGNORECASE)
-
     for home, hg, ag, away, status, minute, _ in matches:
         home = normalize_team(home.strip())
         away = normalize_team(away.strip())
         if home in WORLD_CUP_TEAMS and away in WORLD_CUP_TEAMS:
-            score = f"{hg}-{ag}"
-            return {"home": home, "away": away, "score": score, "status": status.strip() if status else None}
+            return {"home": home, "away": away, "score": f"{hg}-{ag}", "status": status.strip() if status else None}
 
     # Pattern 2: Team vs Team 14:00 kickoff
     pattern2 = r'([A-Za-z\s\.]+?)\s+v[s]?\.\s+([A-Za-z\s\.]+?)\s+(\d{1,2}:\d{2})'
@@ -129,7 +135,6 @@ def parse_match_from_text(text):
     return None
 
 def get_today_from_rss():
-    today_wat = datetime.datetime.now(ZoneInfo("Africa/Lagos")).strftime("%Y-%m-%d")
     results, live, upcoming = [], [], []
     seen = set()
 
@@ -138,17 +143,10 @@ def get_today_from_rss():
         for entry in entries:
             title = getattr(entry, "title", "")
             summary = getattr(entry, "summary", "")
-            published = getattr(entry, "published", "")
-
-            # Filter to today only
-            if published and today_wat not in published:
-                continue
-
-            text = title + " + summary
+            text = f"{title} {summary}"  # fixed syntax
             match = parse_match_from_text(text)
             if not match:
                 continue
-
             key = f"{match['home']}_{match['away']}"
             if key in seen:
                 continue
@@ -167,7 +165,6 @@ def get_today_from_rss():
 
     return {"results": results[:8], "live": live[:5], "upcoming": upcoming[:8]}
 
-# ---------- FORMATTING ----------
 def format_match_line(home, away, score=None, time=None, extra=""):
     flag_home = get_flag(home)
     flag_away = get_flag(away)
@@ -188,22 +185,19 @@ def build_briefing():
         "━━━━━━━━━━━━━━"
     ]
 
-    # 1. Try primary API first
     matches = get_today_matches()
-    data_source = "API"
-
     if matches:
+        data_source = "API"
         completed = [m for m in matches if m.get("finished") == "TRUE"]
         live_now = [m for m in matches if m.get("status") == "live"]
-        upcoming = [m for m in matches if m.get("finished")!= "TRUE" and m.get("status")!= "live"]
+        upcoming = [m for m in matches if m.get("finished") != "TRUE" and m.get("status") != "live"]
     else:
-        # 2. Fallback to RSS for accurate results + live
-        logger.info("API empty, switching to RSS")
+        logger.info("API empty, using RSS fallback")
+        data_source = "RSS"
         rss_data = get_today_from_rss()
         completed = rss_data["results"]
         live_now = rss_data["live"]
         upcoming = rss_data["upcoming"]
-        data_source = "RSS"
 
     if completed:
         lines.append("🏁 **RESULTS**")
@@ -240,7 +234,7 @@ def build_briefing():
             if data_source == "API":
                 home = m.get("home_team_name_en", "TBD")
                 away = m.get("away_team_name_en", "TBD")
-                time_str = m.get("local_date", "").split(" ")[-1] if " in m.get("local_date", "") else ""
+                time_str = m.get("local_date", "").split(" ")[-1] if " " in m.get("local_date", "") else ""
                 time_str = utc_to_wat(time_str) if time_str else ""
                 lines.append(format_match_line(home, away, time=time_str))
             else:
