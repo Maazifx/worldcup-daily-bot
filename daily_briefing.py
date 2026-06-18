@@ -2,18 +2,63 @@ import os
 import requests
 import datetime
 import logging
+import sys
+import json
 
+# Logging setup – we want everything in the Actions log
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHAT_ID = os.environ["CHAT_ID"]
-API_KEY = os.environ.get("FOOTBALL_DATA_KEY")   # ← correct name
+# ---------- Environment variables ----------
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
+API_KEY = os.environ.get("FOOTBALL_DATA_KEY") or os.environ.get("FOOTBALLDATAKEY")
 
+if not BOT_TOKEN or not CHAT_ID:
+    logger.error("BOT_TOKEN or CHAT_ID missing.")
+    sys.exit(1)
+
+if not API_KEY:
+    logger.error("No API key found. Check secret name (FOOTBALL_DATA_KEY or FOOTBALLDATAKEY).")
+    sys.exit(1)
+
+logger.info(f"API key found (length: {len(API_KEY)})")
+
+# ---------- API configuration ----------
 BASE_URL = "https://api.football-data.org/v4"
 HEADERS = {"X-Auth-Token": API_KEY}
 
-WC_COMPETITION_ID = 2000   # FIFA World Cup
+def get_world_cup_competition_id():
+    """Find the FIFA World Cup competition ID dynamically."""
+    url = f"{BASE_URL}/competitions"
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=15)
+        if resp.status_code == 200:
+            competitions = resp.json().get("competitions", [])
+            logger.info(f"Fetched {len(competitions)} competitions.")
+            for comp in competitions:
+                name = comp.get("name", "")
+                code = comp.get("code", "")
+                logger.info(f"Competition: {name} ({code}) - ID: {comp['id']}")
+                # Look for World Cup 2026
+                if "world cup" in name.lower() and "2026" in code.upper():
+                    return comp["id"]
+                if "fifa world cup" in name.lower():
+                    return comp["id"]
+            # Fallback: any "World Cup"
+            for comp in competitions:
+                if "world cup" in comp.get("name", "").lower():
+                    return comp["id"]
+        else:
+            logger.error(f"Failed to fetch competitions: {resp.status_code} - {resp.text[:200]}")
+    except Exception as e:
+        logger.error(f"Failed to fetch competitions: {e}")
+    # Hardcoded fallback – often 2000 for men's World Cup
+    logger.warning("Using fallback competition ID 2000")
+    return 2000
+
+WC_COMPETITION_ID = get_world_cup_competition_id()
+logger.info(f"Using competition ID: {WC_COMPETITION_ID}")
 
 def fetch_matches(competition_id=None, date_from=None, date_to=None):
     url = f"{BASE_URL}/matches"
@@ -24,12 +69,22 @@ def fetch_matches(competition_id=None, date_from=None, date_to=None):
         params["dateFrom"] = date_from
     if date_to:
         params["dateTo"] = date_to
+    logger.info(f"Fetching matches with params: {params}")
     try:
         resp = requests.get(url, headers=HEADERS, params=params, timeout=15)
+        logger.info(f"API response status: {resp.status_code}")
         if resp.status_code == 200:
-            return resp.json().get("matches", [])
+            data = resp.json()
+            matches = data.get("matches", [])
+            logger.info(f"Fetched {len(matches)} matches for date range {date_from} to {date_to}")
+            # Log a sample if any
+            if matches:
+                logger.info(f"Sample match: {matches[0].get('homeTeam',{}).get('name')} vs {matches[0].get('awayTeam',{}).get('name')}")
+            else:
+                logger.warning("No matches returned.")
+            return matches
         else:
-            logger.error(f"API error: {resp.status_code} - {resp.text}")
+            logger.error(f"API error {resp.status_code}: {resp.text[:500]}")
             return []
     except Exception as e:
         logger.error(f"Request failed: {e}")
@@ -83,29 +138,32 @@ def get_status_emoji(status):
     return mapping.get(status, "⚪")
 
 def build_briefing():
-    if not API_KEY:
-        return "❌ FOOTBALL_DATA_KEY secret is not set."
-
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-    all_matches = fetch_matches(date_from=today, date_to=today)
+    logger.info(f"Building briefing for {today}")
 
-    if not all_matches:
-        return "No matches found today."
-
-    # Filter World Cup matches
-    wc_matches = []
-    for m in all_matches:
-        comp = m.get("competition", {})
-        comp_name = comp.get("name", "")
-        if "World Cup" in comp_name or "FIFA" in comp_name or comp.get("id") == WC_COMPETITION_ID:
-            wc_matches.append(m)
+    # First try: fetch directly by competition ID
+    wc_matches = fetch_matches(competition_id=WC_COMPETITION_ID, date_from=today, date_to=today)
 
     if not wc_matches:
-        # fallback – direct query by competition
-        wc_matches = fetch_matches(competition_id=WC_COMPETITION_ID, date_from=today, date_to=today)
+        # Second try: fetch all matches and filter by competition name
+        logger.info("No matches found for competition ID, trying all matches filter")
+        all_matches = fetch_matches(date_from=today, date_to=today)
+        if not all_matches:
+            logger.error("No matches at all today (any competition).")
+            return "No matches found today."
+
+        # Filter by competition name
+        for m in all_matches:
+            comp = m.get("competition", {})
+            comp_name = comp.get("name", "")
+            if "World Cup" in comp_name or "FIFA" in comp_name or comp.get("id") == WC_COMPETITION_ID:
+                wc_matches.append(m)
+
         if not wc_matches:
+            logger.error(f"Found matches but none are World Cup. Competitions seen: {set(m.get('competition',{}).get('name') for m in all_matches)}")
             return "No World Cup matches today."
 
+    # Categorise
     completed = [m for m in wc_matches if m["status"] == "FINISHED"]
     live      = [m for m in wc_matches if m["status"] == "LIVE"]
     upcoming  = [m for m in wc_matches if m["status"] == "SCHEDULED"]
@@ -182,7 +240,7 @@ def send_briefing():
     try:
         text = build_briefing()
         if not text:
-            logger.warning("No content to send.")
+            logger.warning("No text to send.")
             return
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         payload = {
@@ -195,9 +253,9 @@ def send_briefing():
         if resp.status_code == 200:
             logger.info("Briefing sent.")
         else:
-            logger.error(f"Failed: {resp.text}")
+            logger.error(f"Failed to send: {resp.text}")
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error(f"Error sending: {e}")
 
 if __name__ == "__main__":
     send_briefing()
