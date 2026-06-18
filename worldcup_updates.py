@@ -27,9 +27,44 @@ FEEDS = {
 
 SOURCE_PRIORITY = ["BBC Sport", "Sky Sports", "ESPN FC", "The Guardian", "90Min"]
 
+# ---------- STRICT FILTERS ----------
+# 1. Must contain at least one of these (men's World Cup specific)
+REQUIRED_TERMS = [
+    "world cup 2026",
+    "fifa world cup",
+    "men's world cup",
+    "world cup qualifier",
+    "world cup qualifying",
+    "world cup group",
+    "world cup knockout",
+    "world cup final",
+    "world cup semi-final",
+    "world cup quarter-final",
+    "world cup round of 16"
+]
+
+# 2. If any of these appear, skip (women's, other sports, non-football)
+EXCLUDE_TERMS = [
+    "women's",
+    "woman",
+    "female",
+    "lionesses",
+    "wsl",
+    "super league",
+    "euro 2025",
+    "u17",
+    "u20",
+    "u23",
+    "youth",
+    "paralympic",
+    "olympic",
+    "futsal",
+    "beach soccer"
+]
+
+# Also keep the original football terms and banned words (but we can relax football terms)
 FOOTBALL_TERMS = ["football", "soccer", "fifa", "world cup", "goal", "manager", "midfielder", "defender", "striker"]
 BANNED_WORDS = ["darts", "rugby", "cricket", "golf", "tennis", "formula 1", "f1", "motogp", "boxing", "ufc", "mma", "snooker", "basketball", "nba", "nfl", "baseball", "mlb", "horse racing", "cycling", "podcast", "audio", "betting", "odds", "transfer rumours", "transfer rumor", "kit leaked", "home kit", "away kit", "ashes", "test match", "one day international", "odi", "t20", "county championship", "premiership rugby", "six nations", "wimbledon", "atp", "wta", "third kit", "jersey leak"]
-WORLD_CUP_KEYWORDS = ["world cup", "fifa world cup", "world cup 2026", "fifa"]
 
 # ----------------------------------------------------------------------
 # Helper: create a placeholder image (only as last resort)
@@ -61,41 +96,31 @@ def create_placeholder_image(text="World Cup News"):
 # Scrape the article page to find the best image
 # ----------------------------------------------------------------------
 def scrape_article_image(article_url):
-    """
-    Fetch the article HTML and extract the Open Graph image (og:image) or the first large image.
-    Returns a URL string or None.
-    """
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         resp = requests.get(article_url, headers=headers, timeout=15)
         if resp.status_code != 200:
-            logger.debug(f"Could not fetch article page: {article_url}")
             return None
         soup = BeautifulSoup(resp.text, 'lxml')
-        # 1. Look for Open Graph image
         og_tag = soup.find('meta', property='og:image')
         if og_tag and og_tag.get('content'):
             image_url = og_tag['content']
             if image_url.startswith('//'):
                 image_url = 'https:' + image_url
             elif image_url.startswith('/'):
-                # relative – prepend domain (simplistic)
                 from urllib.parse import urlparse
                 parsed = urlparse(article_url)
                 base = f"{parsed.scheme}://{parsed.netloc}"
                 image_url = base + image_url
             return image_url
-        # 2. Look for Twitter card image
         twitter_tag = soup.find('meta', attrs={'name': 'twitter:image'})
         if twitter_tag and twitter_tag.get('content'):
             return twitter_tag['content']
-        # 3. Find the first <img> that is large enough (width > 400)
         images = soup.find_all('img')
         for img in images:
             src = img.get('src')
             if not src:
                 continue
-            # Check width attribute if present
             width = img.get('width')
             if width and int(width) > 400:
                 if src.startswith('//'):
@@ -106,7 +131,6 @@ def scrape_article_image(article_url):
                     base = f"{parsed.scheme}://{parsed.netloc}"
                     src = base + src
                 return src
-        # If we have any image, take the first one (but might be small)
         if images:
             src = images[0].get('src')
             if src:
@@ -120,21 +144,13 @@ def scrape_article_image(article_url):
                 return src
         return None
     except Exception as e:
-        logger.debug(f"Scraping error for {article_url}: {e}")
+        logger.debug(f"Scraping error: {e}")
         return None
 
 # ----------------------------------------------------------------------
 # Get the best image for an article
 # ----------------------------------------------------------------------
 def get_best_image(article_link, feed_image_url):
-    """
-    Try to get image from:
-    1. Scraped article page (best quality)
-    2. RSS feed image (fallback)
-    3. Placeholder (last resort)
-    Always returns a local file path.
-    """
-    # 1. Try scraping the article page
     scraped_url = scrape_article_image(article_link)
     if scraped_url:
         try:
@@ -146,12 +162,10 @@ def get_best_image(article_link, feed_image_url):
                 if width >= 800 and height >= 450:
                     with open("article.jpg", "wb") as f:
                         f.write(resp.content)
-                    logger.info("Used scraped image from article page.")
+                    logger.info("Used scraped image.")
                     return "article.jpg"
         except Exception as e:
             logger.debug(f"Scraped image download failed: {e}")
-
-    # 2. Try RSS feed image
     if feed_image_url and feed_image_url != "BBC_FALLBACK":
         try:
             headers = {"User-Agent": "Mozilla/5.0"}
@@ -159,17 +173,39 @@ def get_best_image(article_link, feed_image_url):
             if resp.status_code == 200:
                 img = Image.open(BytesIO(resp.content))
                 width, height = img.size
-                if width >= 400:  # lower threshold for RSS thumbnails
+                if width >= 400:
                     with open("article.jpg", "wb") as f:
                         f.write(resp.content)
                     logger.info("Used RSS feed image.")
                     return "article.jpg"
         except Exception as e:
             logger.debug(f"RSS image download failed: {e}")
-
-    # 3. Fallback to placeholder
     logger.info("Using placeholder image.")
     return create_placeholder_image()
+
+# ----------------------------------------------------------------------
+# Filtering function
+# ----------------------------------------------------------------------
+def is_men_world_cup_article(title, summary, link):
+    """Return True only if this is a men's FIFA World Cup article."""
+    text = (title + " " + summary).lower()
+    link_lower = link.lower()
+
+    # Exclude women's or other non-men's topics
+    if any(excl in text for excl in EXCLUDE_TERMS):
+        return False
+
+    # Must contain one of the required men's World Cup phrases
+    if not any(req in text for req in REQUIRED_TERMS):
+        # Also check the URL for clues
+        if not ("world-cup" in link_lower or "worldcup" in link_lower or "fifa" in link_lower):
+            return False
+        # If URL has "worldcup" but doesn't contain specific phrase, still accept if it mentions "world cup" and not excluded
+        if "world cup" not in text and "worldcup" not in text:
+            return False
+
+    # Additional check: ensure it's about men's by not having women's terms (already excluded)
+    return True
 
 # ----------------------------------------------------------------------
 # Load posted articles, fetch and filter, send
@@ -200,15 +236,18 @@ for source in SOURCE_PRIORITY:
         if link in posted_articles:
             continue
         clean_summary = re.sub("<.*?>", "", summary).strip()
-        article_text = (title.lower() + " " + clean_summary.lower())
 
+        # --- Apply strict filter ---
+        if not is_men_world_cup_article(title, clean_summary, link):
+            logger.debug(f"Skipped (not men's WC): {title[:50]}")
+            continue
+
+        # Also ensure football terms (just as safety)
+        article_text = title.lower() + " " + clean_summary.lower()
         if not any(term in article_text for term in FOOTBALL_TERMS):
             continue
         if any(banned in article_text for banned in BANNED_WORDS):
             continue
-        if not any(kw in article_text for kw in WORLD_CUP_KEYWORDS):
-            if not ("world-cup" in link.lower() or "worldcup" in link.lower() or "fifa" in link.lower()):
-                continue
 
         # Get RSS image if any
         feed_image = None
@@ -232,7 +271,7 @@ for source in SOURCE_PRIORITY:
         logger.info(f"Found article: {title[:60]}")
 
 if not new_posts:
-    logger.warning("No World Cup news found.")
+    logger.warning("No men's World Cup news found.")
     raise SystemExit
 
 posts_sent = 0
