@@ -7,7 +7,6 @@ import re
 import feedparser
 import urllib3
 
-# Disable SSL warnings (we only do this for the known problematic API)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,15 +25,11 @@ STATE_FILE = "daily_briefing_state.txt"
 WC_API_BASE = "https://worldcup26.ir"
 
 def get_today_matches():
-    """Fetch today's matches from API, ignoring SSL errors."""
     try:
-        # Use verify=False to bypass SSL certificate issues
         resp = requests.get(f"{WC_API_BASE}/get/games", timeout=15, verify=False)
         if resp.status_code != 200:
-            logger.error(f"API returned {resp.status_code}")
             return []
         data = resp.json()
-        logger.info(f"API returned {len(data.get('games', []))} total games")
         today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
         all_games = data.get("games", [])
         today_matches = []
@@ -42,60 +37,89 @@ def get_today_matches():
             local_date = g.get("local_date", "")
             if today in local_date or local_date.replace('/', '-')[:10] == today:
                 today_matches.append(g)
-        logger.info(f"Found {len(today_matches)} matches for today")
         return today_matches
     except Exception as e:
-        logger.warning(f"Primary API failed (SSL or connection): {e}")
+        logger.warning(f"API failed: {e}")
         return []
 
 def get_standings():
-    """Fetch group standings with SSL bypass."""
     try:
         resp = requests.get(f"{WC_API_BASE}/get/groups", timeout=10, verify=False)
         if resp.status_code == 200:
             return resp.json()
         return []
     except Exception as e:
-        logger.warning(f"Standings fetch failed: {e}")
+        logger.warning(f"Standings failed: {e}")
         return []
 
-# ---------- RSS FALLBACK ----------
+# ---------- RSS FALLBACK (improved) ----------
 RSS_FEEDS = {
     "BBC Sport": "https://feeds.bbci.co.uk/sport/football/rss.xml",
     "Sky Sports": "https://www.skysports.com/rss/12040",
     "Guardian": "https://www.theguardian.com/football/rss",
-    "90Min": "https://www.90min.com/posts.rss"
 }
+
+# List of known World Cup teams to validate matches
+KNOWN_TEAMS = [
+    "Argentina", "Algeria", "Australia", "Austria", "Belgium", "Bosnia", "Brazil",
+    "Canada", "Cape Verde", "Colombia", "Croatia", "Curacao", "Czechia", "DR Congo",
+    "Ecuador", "Egypt", "England", "France", "Germany", "Ghana", "Haiti", "Iran",
+    "Iraq", "Ivory Coast", "Japan", "Mexico", "Morocco", "Netherlands", "New Zealand",
+    "Norway", "Panama", "Paraguay", "Portugal", "Qatar", "Saudi Arabia", "Scotland",
+    "Senegal", "South Africa", "South Korea", "Spain", "Sweden", "Switzerland",
+    "Tunisia", "Turkiye", "Uruguay", "USA", "Uzbekistan", "Wales"
+]
+TEAM_SET = set(KNOWN_TEAMS)
 
 def fetch_articles_from_feed(url):
     try:
         feed = feedparser.parse(url, request_headers={"User-Agent": "Mozilla/5.0"})
-        return feed.entries[:20]
+        return feed.entries[:30]
     except Exception as e:
         logger.error(f"RSS failed for {url}: {e}")
         return []
 
+def is_valid_team(name):
+    """Check if a name looks like a real team (starts with capital letter, not too short)."""
+    name = name.strip()
+    if len(name) < 2:
+        return False
+    # Check against known teams first
+    if name in TEAM_SET:
+        return True
+    # Also accept if it starts with uppercase and is at least 3 chars
+    if name[0].isupper() and len(name) >= 3:
+        return True
+    return False
+
 def extract_match_info(text):
-    patterns = [
-        r'([A-Za-z ]+)\s+(\d+)\s*[-–:;]\s*(\d+)\s+([A-Za-z ]+)',  # Team A 2-1 Team B
-        r'([A-Za-z ]+)\s+v(?:s)?\.?\s+([A-Za-z ]+)',              # Team A vs Team B
-        r'([A-Za-z ]+)\s+[-–]\s+([A-Za-z ]+)',                    # Team A - Team B
-    ]
-    for pat in patterns:
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            groups = m.groups()
-            if len(groups) == 4:
-                return (groups[0].strip(), groups[1].strip(), f"{groups[2]}-{groups[3]}")
-            elif len(groups) == 2:
-                return (groups[0].strip(), groups[1].strip(), None)
+    """Extract home team, away team, and score with validation."""
+    # Pattern: Team A 2-1 Team B
+    pattern = r'([A-Za-z ]{2,30})\s+(\d+)\s*[-–:;]\s*(\d+)\s+([A-Za-z ]{2,30})'
+    matches = re.findall(pattern, text, re.IGNORECASE)
+    for home, hg, ag, away in matches:
+        home = home.strip()
+        away = away.strip()
+        # Validate both are real team names
+        if is_valid_team(home) and is_valid_team(away):
+            return (home, away, f"{hg}-{ag}")
+    
+    # Pattern: Team A vs Team B (no score)
+    pattern2 = r'([A-Za-z ]{2,30})\s+v(?:s)?\.?\s+([A-Za-z ]{2,30})'
+    matches2 = re.findall(pattern2, text, re.IGNORECASE)
+    for home, away in matches2:
+        home = home.strip()
+        away = away.strip()
+        if is_valid_team(home) and is_valid_team(away):
+            return (home, away, None)
+    
     return (None, None, None)
 
 def is_result(text):
-    return any(kw in text.lower() for kw in ["full-time", "result", "final", "wins", "beat", "defeat", "draw"])
+    return any(kw in text.lower() for kw in ["full-time", "result", "final", "wins", "beat", "defeat", "draw", "win"])
 
 def is_live(text):
-    return any(kw in text.lower() for kw in ["live", "minute", "half-time", "updates"])
+    return any(kw in text.lower() for kw in ["live", "minute", "half-time", "updates", "breaking"])
 
 def build_from_rss():
     all_articles = []
@@ -121,12 +145,12 @@ def build_from_rss():
         if key in seen:
             continue
         seen.add(key)
-        if is_result(text) and score:
-            results.append(f"{home} {score} {away} ({art['source']})")
+        if score and is_result(text):
+            results.append(f"{home} {score} {away}")
         elif is_live(text):
-            live.append(f"{home} vs {away} — LIVE ({art['source']})")
+            live.append(f"{home} vs {away}")
         else:
-            upcoming.append(f"{home} vs {away} ({art['source']})")
+            upcoming.append(f"{home} vs {away}")
     
     return results, live, upcoming
 
@@ -136,10 +160,8 @@ def format_match(m):
     away = m.get("away_team_name_en", "TBD")
     score = f"{m.get('home_score', 0)}-{m.get('away_score', 0)}" if m.get("finished") == "TRUE" else "vs"
     time_info = m.get("local_date", "TBD")
-    stadium_id = m.get("stadium_id")
-    venue = f" (Stadium {stadium_id})" if stadium_id else ""
     status = "✅" if m.get("finished") == "TRUE" else "⏳"
-    return f"{status} **{home}** {score} **{away}** — {time_info}{venue}"
+    return f"{status} **{home}** {score} **{away}** — {time_info}"
 
 def build_briefing():
     today_str = datetime.datetime.utcnow().strftime("%B %d, %Y")
@@ -167,7 +189,7 @@ def build_briefing():
 
         standings = get_standings()
         if standings:
-            lines.append("🏆 **CURRENT GROUP STANDINGS** (Highlights)")
+            lines.append("🏆 **CURRENT GROUP STANDINGS**")
             for group in standings[:4]:
                 g_name = group.get("group", group.get("name", "Group"))
                 lines.append(f"**{g_name}**")
@@ -187,20 +209,22 @@ def build_briefing():
         
         if results or live or upcoming:
             if results:
-                lines.append("🏁 **RESULTS** (from news feeds)")
-                lines.extend(results[:5])
+                lines.append("🏁 **RESULTS**")
+                for r in results[:5]:
+                    lines.append(r)
                 lines.append("")
             if live:
-                lines.append("🔴 **LIVE MATCHES** (from news feeds)")
-                lines.extend(live[:3])
+                lines.append("🔴 **LIVE MATCHES**")
+                for l in live[:3]:
+                    lines.append(l)
                 lines.append("")
             if upcoming:
-                lines.append("⏳ **UPCOMING FIXTURES** (from news feeds)")
-                lines.extend(upcoming[:5])
+                lines.append("⏳ **UPCOMING FIXTURES**")
+                for u in upcoming[:5]:
+                    lines.append(u)
                 lines.append("")
-            lines.append("⚽ *Data sourced from BBC, Sky, Guardian, and 90Min RSS feeds.*")
+            lines.append("⚽ *Data sourced from BBC, Sky, and Guardian RSS feeds.*")
         else:
-            # Nothing from RSS either – show known upcoming dates
             lines.append("No matches scheduled for today.")
             lines.append("")
             lines.append("📅 **UPCOMING WORLD CUP FIXTURES:**")
@@ -208,8 +232,6 @@ def build_briefing():
             lines.append("• June 20: Group C & D matches")
             lines.append("• June 21: Group E & F matches")
             lines.append("• June 22: Group G & H matches")
-            lines.append("")
-            lines.append("Visit https://worldcup26.ir for full schedule.")
 
     lines.append("\n📲 @wcupdates2026")
     return "\n".join(lines)
