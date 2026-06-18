@@ -2,7 +2,7 @@ name: Daily Briefing
 
 on:
   schedule:
-    - cron: '0 21 * * *'   # 9 PM UTC = 10 PM Nigeria time
+    - cron: '0 19 * * *'   # 19:00 UTC = 20:00 WAT (Nigeria time)
   workflow_dispatch:
 
 concurrency:
