@@ -3,7 +3,6 @@ import requests
 import os
 import re
 import time
-import random
 import json
 import logging
 import hashlib
@@ -17,7 +16,6 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
-# Use a JSON state file
 POSTED_FILE = "worldcup_posted_articles.json"
 
 FEEDS = {
@@ -31,24 +29,14 @@ FEEDS = {
 SOURCE_PRIORITY = ["BBC Sport", "Sky Sports", "ESPN FC", "The Guardian", "90Min"]
 
 # ---------- STRICT FILTERS ----------
-# 1. Must contain at least one of these (men's World Cup specific)
 REQUIRED_TERMS = [
-    "world cup 2026",
-    "fifa world cup",
-    "men's world cup",
-    "world cup qualifier",
-    "world cup qualifying",
-    "world cup group",
-    "world cup knockout",
-    "world cup final",
-    "world cup semi-final",
-    "world cup quarter-final",
-    "world cup round of 16",
-    "world cup opener",
-    "world cup campaign"
+    "world cup 2026", "fifa world cup", "men's world cup",
+    "world cup qualifier", "world cup qualifying", "world cup group",
+    "world cup knockout", "world cup final", "world cup semi-final",
+    "world cup quarter-final", "world cup round of 16",
+    "world cup opener", "world cup campaign"
 ]
 
-# 2. If any of these appear, skip (women's, other sports, non-football)
 EXCLUDE_TERMS = [
     # Women's football
     "women's", "woman", "female", "lionesses", "wsl",
@@ -62,10 +50,8 @@ EXCLUDE_TERMS = [
     "how to play", "final whistle", "round score"
 ]
 
-# 3. Football terms – must include at least one
 FOOTBALL_TERMS = ["football", "soccer", "fifa", "world cup", "goal", "manager", "midfielder", "defender", "striker"]
 
-# 4. Banned words – skip if any appear
 BANNED_WORDS = [
     "darts", "rugby", "cricket", "golf", "tennis", "formula 1", "f1",
     "motogp", "boxing", "ufc", "mma", "snooker", "basketball", "nba",
@@ -189,7 +175,7 @@ def get_best_image(article_link, feed_image_url):
     return create_placeholder_image()
 
 # ----------------------------------------------------------------------
-# Title normalisation and hashing
+# Title normalisation and hashing (for duplicate prevention)
 # ----------------------------------------------------------------------
 def normalise_title(title):
     title = title.lower()
@@ -208,38 +194,31 @@ def is_men_world_cup_article(title, summary, link):
     text = (title + " " + summary).lower()
     link_lower = link.lower()
 
-    # --- Block women's football ---
-    # Check for explicit women's terms
+    # Block women's, 2027, promotional
     if any(excl in text for excl in EXCLUDE_TERMS):
         logger.debug(f"Excluded (EXCLUDE_TERMS): {title[:50]}")
         return False
 
-    # Check for 2027 (women's World Cup)
     if "2027" in text and ("world cup" in text or "worldcup" in text):
         logger.debug(f"Excluded (2027 World Cup): {title[:50]}")
         return False
 
-    # --- Must contain required terms ---
+    # Must contain required terms
     if not any(req in text for req in REQUIRED_TERMS):
-        # Check URL as fallback
         if not ("world-cup" in link_lower or "worldcup" in link_lower or "fifa" in link_lower):
-            logger.debug(f"Skipped (no required term): {title[:50]}")
             return False
-        # If URL has worldcup but text doesn't mention "world cup" explicitly, still require it
         if "world cup" not in text and "worldcup" not in text:
-            logger.debug(f"Skipped (no 'world cup'): {title[:50]}")
             return False
 
-    # --- Extra check: ensure it's about men's (no women's terms) ---
+    # Extra check: ensure not women's
     women_terms = ["women", "woman", "female", "lionesses", "wiegman", "2027"]
     if any(term in text for term in women_terms):
-        logger.debug(f"Excluded (women's): {title[:50]}")
         return False
 
     return True
 
 # ----------------------------------------------------------------------
-# Load posted state (JSON)
+# Load / save state
 # ----------------------------------------------------------------------
 def load_posted_state():
     posted_links = set()
@@ -269,8 +248,8 @@ def save_posted_state(links, hashes):
 # ----------------------------------------------------------------------
 def main():
     posted_links, posted_hashes = load_posted_state()
-
     new_posts = []
+
     for source in SOURCE_PRIORITY:
         feed = feedparser.parse(FEEDS[source])
         if not hasattr(feed, "entries"):
@@ -285,27 +264,21 @@ def main():
             if not title or not link:
                 continue
 
-            # Deduplicate by link and title hash
             title_hash = get_title_hash(title)
             if link in posted_links or title_hash in posted_hashes:
                 continue
 
             clean_summary = re.sub("<.*?>", "", summary).strip()
 
-            # Check if it's a men's World Cup article
             if not is_men_world_cup_article(title, clean_summary, link):
                 continue
 
-            # Football terms check
             article_text = title.lower() + " " + clean_summary.lower()
             if not any(term in article_text for term in FOOTBALL_TERMS):
                 continue
-
-            # Banned words check
             if any(banned in article_text for banned in BANNED_WORDS):
                 continue
 
-            # Get image
             feed_image = None
             if hasattr(article, "media_content"):
                 try: feed_image = article.media_content[0]["url"]
