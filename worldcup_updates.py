@@ -28,14 +28,18 @@ FEEDS = {
 
 SOURCE_PRIORITY = ["BBC Sport", "Sky Sports", "ESPN FC", "The Guardian", "90Min"]
 
-# ---------- STRICT FILTERS ----------
-REQUIRED_TERMS = [
-    "world cup 2026", "fifa world cup", "men's world cup",
-    "world cup qualifier", "world cup qualifying", "world cup group",
-    "world cup knockout", "world cup final", "world cup semi-final",
-    "world cup quarter-final", "world cup round of 16",
-    "world cup opener", "world cup campaign"
-]
+# ---------- FLEXIBLE TOURNAMENT COMPETITOR DICTIONARY ----------
+WORLD_CUP_TEAMS = {
+    "argentina", "algeria", "australia", "austria", "belgium", "bosnia", "brazil",
+    "canada", "cape verde", "colombia", "croatia", "curacao", "czechia", "dr congo",
+    "ecuador", "egypt", "england", "france", "germany", "ghana", "haiti", "iran",
+    "iraq", "ivory coast", "japan", "mexico", "morocco", "netherlands", "new zealand",
+    "norway", "panama", "paraguay", "portugal", "qatar", "saudi arabia", "scotland",
+    "senegal", "south africa", "south korea", "spain", "sweden", "switzerland",
+    "tunisia", "turkiye", "uruguay", "usa", "uzbekistan", "wales"
+}
+
+REQUIRED_TERMS = ["world cup", "worldcup", "fifa", "wc2026", "wc 2026"]
 
 EXCLUDE_TERMS = [
     "women's", "woman", "female", "lionesses", "wsl",
@@ -107,32 +111,6 @@ def scrape_article_image(article_url):
         twitter_tag = soup.find('meta', attrs={'name': 'twitter:image'})
         if twitter_tag and twitter_tag.get('content'):
             return twitter_tag['content']
-        images = soup.find_all('img')
-        for img in images:
-            src = img.get('src')
-            if not src:
-                continue
-            width = img.get('width')
-            if width and int(width) > 400:
-                if src.startswith('//'):
-                    src = 'https:' + src
-                elif src.startswith('/'):
-                    from urllib.parse import urlparse
-                    parsed = urlparse(article_url)
-                    base = f"{parsed.scheme}://{parsed.netloc}"
-                    src = base + src
-                return src
-        if images:
-            src = images[0].get('src')
-            if src:
-                if src.startswith('//'):
-                    src = 'https:' + src
-                elif src.startswith('/'):
-                    from urllib.parse import urlparse
-                    parsed = urlparse(article_url)
-                    base = f"{parsed.scheme}://{parsed.netloc}"
-                    src = base + src
-                return src
         return None
     except Exception as e:
         logger.debug(f"Scraping error: {e}")
@@ -147,10 +125,9 @@ def get_best_image(article_link, feed_image_url):
             if resp.status_code == 200:
                 img = Image.open(BytesIO(resp.content))
                 width, height = img.size
-                if width >= 800 and height >= 450:
+                if width >= 600 and height >= 350:
                     with open("article.jpg", "wb") as f:
                         f.write(resp.content)
-                    logger.info("Used scraped image.")
                     return "article.jpg"
         except Exception as e:
             logger.debug(f"Scraped image download failed: {e}")
@@ -159,89 +136,66 @@ def get_best_image(article_link, feed_image_url):
             headers = {"User-Agent": "Mozilla/5.0"}
             resp = requests.get(feed_image_url, headers=headers, timeout=20)
             if resp.status_code == 200:
-                img = Image.open(BytesIO(resp.content))
-                width, height = img.size
-                if width >= 400:
-                    with open("article.jpg", "wb") as f:
-                        f.write(resp.content)
-                    logger.info("Used RSS feed image.")
-                    return "article.jpg"
+                with open("article.jpg", "wb") as f:
+                    f.write(resp.content)
+                return "article.jpg"
         except Exception as e:
             logger.debug(f"RSS image download failed: {e}")
-    logger.info("Using placeholder image.")
     return create_placeholder_image()
 
-# ----------------------------------------------------------------------
-# Title normalisation and hashing (for duplicate prevention)
-# ----------------------------------------------------------------------
 def normalise_title(title):
     title = title.lower()
     title = re.sub(r'[^\w\s]', '', title)
-    title = re.sub(r'\s+', ' ', title).strip()
-    return title
+    return re.sub(r'\s+', ' ', title).strip()
 
 def get_title_hash(title):
     norm = normalise_title(title)
     return hashlib.sha1(norm.encode('utf-8')).hexdigest()
 
 # ----------------------------------------------------------------------
-# Men's World Cup filter
+# Cleaned Evaluation Filters
 # ----------------------------------------------------------------------
 def is_men_world_cup_article(title, summary, link):
     text = (title + " " + summary).lower()
-    link_lower = link.lower()
 
     if any(excl in text for excl in EXCLUDE_TERMS):
-        logger.debug(f"Excluded (EXCLUDE_TERMS): {title[:50]}")
         return False
 
-    if "2027" in text and ("world cup" in text or "worldcup" in text):
-        logger.debug(f"Excluded (2027 World Cup): {title[:50]}")
-        return False
+    # Check that it involves tournament elements or active qualified nations
+    contains_req = any(req in text for req in REQUIRED_TERMS) or "world-cup" in link.lower()
+    contains_team = any(team in text for team in WORLD_CUP_TEAMS)
 
-    if not any(req in text for req in REQUIRED_TERMS):
-        if not ("world-cup" in link_lower or "worldcup" in link_lower or "fifa" in link_lower):
-            return False
-        if "world cup" not in text and "worldcup" not in text:
-            return False
-
-    women_terms = ["women", "woman", "female", "lionesses", "wiegman", "2027"]
-    if any(term in text for term in women_terms):
-        return False
-
-    return True
+    return contains_req and contains_team
 
 # ----------------------------------------------------------------------
-# Load / save state
+# JSON Load / Save Functions
 # ----------------------------------------------------------------------
 def load_posted_state():
-    posted_links = set()
-    posted_hashes = set()
     if os.path.exists(POSTED_FILE):
         try:
             with open(POSTED_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for entry in data:
-                posted_links.add(entry["link"])
-                posted_hashes.add(entry["title_hash"])
-            logger.info(f"Loaded {len(posted_links)} posted articles.")
+                return json.load(f)
         except Exception as e:
-            logger.warning(f"Failed to load JSON state: {e}")
-    else:
-        logger.info("No state file, starting fresh.")
-    return posted_links, posted_hashes
+            logger.warning(f"Failed to read JSON file registry: {e}")
+            return []
+    return []
 
-def save_posted_state(links, hashes):
-    data = [{"link": link, "title_hash": h} for link, h in zip(links, hashes)]
-    with open(POSTED_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    logger.info(f"Saved {len(data)} posted articles.")
+def save_posted_state(state_list):
+    try:
+        with open(POSTED_FILE, "w", encoding="utf-8") as f:
+            json.dump(state_list, f, indent=2, ensure_ascii=False)
+        logger.info(f"Database sync successful. Tracked collection length: {len(state_list)}")
+    except Exception as e:
+        logger.error(f"Failed to write out state modifications: {e}")
 
 # ----------------------------------------------------------------------
-# Main routine
+# Execution Engine
 # ----------------------------------------------------------------------
 def main():
-    posted_links, posted_hashes = load_posted_state()
+    history_log = load_posted_state()
+    posted_links = {entry["link"] for entry in history_log}
+    posted_hashes = {entry["title_hash"] for entry in history_log}
+    
     new_posts = []
 
     for source in SOURCE_PRIORITY:
@@ -249,7 +203,7 @@ def main():
         if not hasattr(feed, "entries"):
             continue
         source_count = 0
-        for article in feed.entries[:50]:
+        for article in feed.entries[:30]:
             if source_count >= 2:
                 break
             title = getattr(article, "title", "").strip()
@@ -260,7 +214,6 @@ def main():
 
             title_hash = get_title_hash(title)
             if link in posted_links or title_hash in posted_hashes:
-                logger.debug(f"Skipping duplicate: {title[:50]}")
                 continue
 
             clean_summary = re.sub("<.*?>", "", summary).strip()
@@ -269,9 +222,7 @@ def main():
                 continue
 
             article_text = title.lower() + " " + clean_summary.lower()
-            if not any(term in article_text for term in FOOTBALL_TERMS):
-                continue
-            if any(banned in article_text for banned in BANNED_WORDS):
+            if not any(term in article_text for term in FOOTBALL_TERMS) or any(banned in article_text for banned in BANNED_WORDS):
                 continue
 
             feed_image = None
@@ -293,10 +244,10 @@ def main():
                 "title_hash": title_hash
             })
             source_count += 1
-            logger.info(f"Found article: {title[:60]}")
+            logger.info(f"Staged article item matching criteria: {title[:50]}")
 
     if not new_posts:
-        logger.info("No new World Cup articles found.")
+        logger.info("No fresh articles found on this sweep execution cycle.")
         return
 
     posts_sent = 0
@@ -308,10 +259,10 @@ def main():
             continue
         try:
             caption = (
-                f"🚨 BREAKING\n\n"
-                f"{post['title']}\n\n"
-                f"{post['summary']}\n\n"
-                f"🏆 Source: {post['source']}\n"
+                f"🚨 *BREAKING NEWS*\n\n"
+                f"*{post['title']}*\n\n"
+                f"{post['summary']}...\n\n"
+                f"🏆 *Source:* {post['source']}\n"
                 f"📲 @wcupdates2026"
             )
             reply_markup = {"inline_keyboard": [[{"text": "📰 Read Full Story", "url": post["link"]}]]}
@@ -321,6 +272,7 @@ def main():
                     data={
                         "chat_id": CHAT_ID,
                         "caption": caption[:1024],
+                        "parse_mode": "Markdown",
                         "reply_markup": json.dumps(reply_markup)
                     },
                     files={"photo": img}
@@ -329,20 +281,18 @@ def main():
                 posts_sent += 1
                 posted_links.add(post["link"])
                 posted_hashes.add(post["title_hash"])
-                logger.info(f"Posted: {post['title']}")
                 
-                # ✅ SAVE IMMEDIATELY AFTER EACH POST
-                save_posted_state(posted_links, posted_hashes)
+                # Append structured dictionary profile item seamlessly
+                history_log.append({"link": post["link"], "title_hash": post["title_hash"]})
+                save_posted_state(history_log)
+                logger.info(f"Pushed update channel update notification: {post['title']}")
             else:
-                logger.error(f"Failed to post: {resp.text}")
-            time.sleep(4)
+                logger.error(f"Telegram processing failure context trace: {resp.text}")
+            time.sleep(5)
         except Exception as e:
-            logger.error(f"Error posting: {e}")
+            logger.error(f"Fatal error handling channel push: {e}")
 
-    # Final save (in case something was posted but not saved)
-    if posts_sent > 0:
-        save_posted_state(posted_links, posted_hashes)
-    logger.info(f"Posted {posts_sent} new World Cup articles.")
+    logger.info(f"Successfully processed {posts_sent} updates during this lifecycle validation run.")
 
 if __name__ == "__main__":
     main()
