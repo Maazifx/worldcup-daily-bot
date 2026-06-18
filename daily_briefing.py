@@ -6,6 +6,7 @@ import sys
 import re
 import feedparser
 import urllib3
+import pytz
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -21,7 +22,60 @@ if not BOT_TOKEN or not CHAT_ID:
 
 STATE_FILE = "daily_briefing_state.txt"
 
-# ---------- PRIMARY API (with SSL bypass) ----------
+# ---------- WORLD CUP 2026 TEAMS (48) ----------
+WORLD_CUP_TEAMS = {
+    "Argentina", "Algeria", "Australia", "Austria", "Belgium", "Bosnia", "Brazil",
+    "Canada", "Cape Verde", "Colombia", "Croatia", "Curacao", "Czechia", "DR Congo",
+    "Ecuador", "Egypt", "England", "France", "Germany", "Ghana", "Haiti", "Iran",
+    "Iraq", "Ivory Coast", "Japan", "Mexico", "Morocco", "Netherlands", "New Zealand",
+    "Norway", "Panama", "Paraguay", "Portugal", "Qatar", "Saudi Arabia", "Scotland",
+    "Senegal", "South Africa", "South Korea", "Spain", "Sweden", "Switzerland",
+    "Tunisia", "Turkiye", "Uruguay", "USA", "Uzbekistan", "Wales"
+}
+
+# Country -> flag emoji mapping
+FLAG_MAP = {
+    "Argentina": "🇦🇷", "Algeria": "🇩🇿", "Australia": "🇦🇺", "Austria": "🇦🇹",
+    "Belgium": "🇧🇪", "Bosnia": "🇧🇦", "Brazil": "🇧🇷", "Canada": "🇨🇦",
+    "Cape Verde": "🇨🇻", "Colombia": "🇨🇴", "Croatia": "🇭🇷", "Curacao": "🇨🇼",
+    "Czechia": "🇨🇿", "DR Congo": "🇨🇩", "Ecuador": "🇪🇨", "Egypt": "🇪🇬",
+    "England": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "France": "🇫🇷", "Germany": "🇩🇪", "Ghana": "🇬🇭",
+    "Haiti": "🇭🇹", "Iran": "🇮🇷", "Iraq": "🇮🇶", "Ivory Coast": "🇨🇮",
+    "Japan": "🇯🇵", "Mexico": "🇲🇽", "Morocco": "🇲🇦", "Netherlands": "🇳🇱",
+    "New Zealand": "🇳🇿", "Norway": "🇳🇴", "Panama": "🇵🇦", "Paraguay": "🇵🇾",
+    "Portugal": "🇵🇹", "Qatar": "🇶🇦", "Saudi Arabia": "🇸🇦", "Scotland": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+    "Senegal": "🇸🇳", "South Africa": "🇿🇦", "South Korea": "🇰🇷", "Spain": "🇪🇸",
+    "Sweden": "🇸🇪", "Switzerland": "🇨🇭", "Tunisia": "🇹🇳", "Turkiye": "🇹🇷",
+    "Uruguay": "🇺🇾", "USA": "🇺🇸", "Uzbekistan": "🇺🇿", "Wales": "🏴󠁧󠁢󠁷󠁬󠁳󠁿"
+}
+
+def get_flag(country):
+    return FLAG_MAP.get(country, "🏳️")
+
+# ---------- TIMEZONE HELPERS ----------
+def utc_to_wat(utc_time_str):
+    """Convert UTC time string (HH:MM) to WAT (UTC+1)."""
+    try:
+        hour, minute = map(int, utc_time_str.split(":"))
+        hour = (hour + 1) % 24
+        return f"{hour:02d}:{minute:02d} WAT"
+    except:
+        return utc_time_str
+
+def parse_time_from_text(text):
+    """Try to find a time like '23:00' or '3pm' in text."""
+    match = re.search(r'(\d{1,2}):(\d{2})', text)
+    if match:
+        return f"{match.group(1)}:{match.group(2)}"
+    match = re.search(r'(\d{1,2})\s*(?:am|pm)', text, re.IGNORECASE)
+    if match:
+        h = int(match.group(1))
+        if 'pm' in match.group(0).lower() and h < 12:
+            h += 12
+        return f"{h:02d}:00"
+    return None
+
+# ---------- API (worldcup26.ir) ----------
 WC_API_BASE = "https://worldcup26.ir"
 
 def get_today_matches():
@@ -52,24 +106,12 @@ def get_standings():
         logger.warning(f"Standings failed: {e}")
         return []
 
-# ---------- RSS FALLBACK (improved) ----------
+# ---------- RSS FALLBACK (STRICT) ----------
 RSS_FEEDS = {
     "BBC Sport": "https://feeds.bbci.co.uk/sport/football/rss.xml",
     "Sky Sports": "https://www.skysports.com/rss/12040",
     "Guardian": "https://www.theguardian.com/football/rss",
 }
-
-# List of known World Cup teams to validate matches
-KNOWN_TEAMS = [
-    "Argentina", "Algeria", "Australia", "Austria", "Belgium", "Bosnia", "Brazil",
-    "Canada", "Cape Verde", "Colombia", "Croatia", "Curacao", "Czechia", "DR Congo",
-    "Ecuador", "Egypt", "England", "France", "Germany", "Ghana", "Haiti", "Iran",
-    "Iraq", "Ivory Coast", "Japan", "Mexico", "Morocco", "Netherlands", "New Zealand",
-    "Norway", "Panama", "Paraguay", "Portugal", "Qatar", "Saudi Arabia", "Scotland",
-    "Senegal", "South Africa", "South Korea", "Spain", "Sweden", "Switzerland",
-    "Tunisia", "Turkiye", "Uruguay", "USA", "Uzbekistan", "Wales"
-]
-TEAM_SET = set(KNOWN_TEAMS)
 
 def fetch_articles_from_feed(url):
     try:
@@ -80,46 +122,56 @@ def fetch_articles_from_feed(url):
         return []
 
 def is_valid_team(name):
-    """Check if a name looks like a real team (starts with capital letter, not too short)."""
-    name = name.strip()
-    if len(name) < 2:
-        return False
-    # Check against known teams first
-    if name in TEAM_SET:
-        return True
-    # Also accept if it starts with uppercase and is at least 3 chars
-    if name[0].isupper() and len(name) >= 3:
-        return True
-    return False
+    """Check if name is in the World Cup teams list."""
+    return name in WORLD_CUP_TEAMS
 
 def extract_match_info(text):
-    """Extract home team, away team, and score with validation."""
+    """
+    Extract home, away, score, and time from text.
+    Returns (home, away, score, time_str) or (None,None,None,None)
+    """
     # Pattern: Team A 2-1 Team B
-    pattern = r'([A-Za-z ]{2,30})\s+(\d+)\s*[-–:;]\s*(\d+)\s+([A-Za-z ]{2,30})'
+    pattern = r'([A-Za-z ]+)\s+(\d+)\s*[-–:;]\s*(\d+)\s+([A-Za-z ]+)'
     matches = re.findall(pattern, text, re.IGNORECASE)
     for home, hg, ag, away in matches:
         home = home.strip()
         away = away.strip()
-        # Validate both are real team names
         if is_valid_team(home) and is_valid_team(away):
-            return (home, away, f"{hg}-{ag}")
+            score = f"{hg}-{ag}"
+            # Try to find time in same text
+            time_str = parse_time_from_text(text)
+            return (home, away, score, time_str)
     
-    # Pattern: Team A vs Team B (no score)
-    pattern2 = r'([A-Za-z ]{2,30})\s+v(?:s)?\.?\s+([A-Za-z ]{2,30})'
+    # Pattern: Team A vs Team B
+    pattern2 = r'([A-Za-z ]+)\s+v(?:s)?\.?\s+([A-Za-z ]+)'
     matches2 = re.findall(pattern2, text, re.IGNORECASE)
     for home, away in matches2:
         home = home.strip()
         away = away.strip()
         if is_valid_team(home) and is_valid_team(away):
-            return (home, away, None)
+            time_str = parse_time_from_text(text)
+            return (home, away, None, time_str)
     
-    return (None, None, None)
-
-def is_result(text):
-    return any(kw in text.lower() for kw in ["full-time", "result", "final", "wins", "beat", "defeat", "draw", "win"])
+    # Pattern: "Team A beat Team B" or "Team A draw with Team B"
+    pattern3 = r'([A-Za-z ]+)\s+(?:beat|wins?|defeat|draws? with)\s+([A-Za-z ]+)'
+    matches3 = re.findall(pattern3, text, re.IGNORECASE)
+    for home, away in matches3:
+        home = home.strip()
+        away = away.strip()
+        if is_valid_team(home) and is_valid_team(away):
+            # Try to find score in the same text
+            score_match = re.search(r'(\d+)\s*[-–:;]\s*(\d+)', text)
+            score = f"{score_match.group(1)}-{score_match.group(2)}" if score_match else None
+            time_str = parse_time_from_text(text)
+            return (home, away, score, time_str)
+    
+    return (None, None, None, None)
 
 def is_live(text):
-    return any(kw in text.lower() for kw in ["live", "minute", "half-time", "updates", "breaking"])
+    return any(kw in text.lower() for kw in ["live", "minute", "half-time", "updates"])
+
+def is_finished(text):
+    return any(kw in text.lower() for kw in ["full-time", "result", "final", "wins", "beat", "defeat", "draw"])
 
 def build_from_rss():
     all_articles = []
@@ -133,107 +185,178 @@ def build_from_rss():
                 all_articles.append({"title": title, "summary": summary, "source": source})
     
     if not all_articles:
-        return [], [], []
+        return {"results": [], "live": [], "upcoming": []}
     
-    results, live, upcoming, seen = [], [], [], set()
+    seen = set()
+    results, live, upcoming = [], [], []
     for art in all_articles:
         text = art["title"] + " " + art["summary"]
-        home, away, score = extract_match_info(text)
+        home, away, score, time_str = extract_match_info(text)
         if not home or not away:
             continue
-        key = f"{home}_{away}"
+        key = f"{home}_{away}_{score}"
         if key in seen:
             continue
         seen.add(key)
-        if score and is_result(text):
-            results.append(f"{home} {score} {away}")
+        
+        entry = {
+            "home": home,
+            "away": away,
+            "score": score,
+            "time": time_str,
+            "source": art["source"]
+        }
+        if score and is_finished(text):
+            results.append(entry)
         elif is_live(text):
-            live.append(f"{home} vs {away}")
+            live.append(entry)
         else:
-            upcoming.append(f"{home} vs {away}")
+            upcoming.append(entry)
     
-    return results, live, upcoming
+    # Deduplicate further by exact match
+    def dedup(lst):
+        seen2 = set()
+        out = []
+        for item in lst:
+            k = f"{item['home']}_{item['away']}"
+            if k not in seen2:
+                seen2.add(k)
+                out.append(item)
+        return out
+    
+    return {
+        "results": dedup(results),
+        "live": dedup(live),
+        "upcoming": dedup(upcoming)
+    }
 
-# ---------- FORMATTING ----------
-def format_match(m):
-    home = m.get("home_team_name_en", "TBD")
-    away = m.get("away_team_name_en", "TBD")
-    score = f"{m.get('home_score', 0)}-{m.get('away_score', 0)}" if m.get("finished") == "TRUE" else "vs"
-    time_info = m.get("local_date", "TBD")
-    status = "✅" if m.get("finished") == "TRUE" else "⏳"
-    return f"{status} **{home}** {score} **{away}** — {time_info}"
+# ---------- FORMAT WITH FLAGS ----------
+def format_match_line(home, away, score=None, time=None, extra=""):
+    flag_home = get_flag(home)
+    flag_away = get_flag(away)
+    score_part = f" {score}" if score else ""
+    time_part = f" 🕒 {time}" if time else ""
+    return f"{flag_home} {home}{score_part} {flag_away} {away}{time_part}{extra}"
 
 def build_briefing():
-    today_str = datetime.datetime.utcnow().strftime("%B %d, %Y")
+    today = datetime.datetime.utcnow()
+    today_str = today.strftime("%d %B %Y")
+    time_wat = utc_to_wat(today.strftime("%H:%M"))
+
     lines = [
-        "🌍 **WORLD CUP 2026 DAILY BRIEFING**",
-        f"📅 {today_str}\n"
+        "🌎 **FIFA WORLD CUP 2026 DAILY BRIEFING**",
+        "",
+        f"📅 {today_str}",
+        f"🕒 {time_wat}",
+        "━━━━━━━━━━━━━━"
     ]
 
     # Try primary API
     matches = get_today_matches()
     if matches:
         completed = [m for m in matches if m.get("finished") == "TRUE"]
-        upcoming = [m for m in matches if m.get("finished") != "TRUE"]
+        live_now = [m for m in matches if m.get("finished") != "TRUE" and m.get("status") == "live"]
+        upcoming = [m for m in matches if m.get("finished") != "TRUE" and m.get("status") != "live"]
 
         if completed:
             lines.append("🏁 **RESULTS**")
-            for m in completed:
-                lines.append(format_match(m))
-            lines.append("")
+            for m in completed[:5]:
+                home = m.get("home_team_name_en", "TBD")
+                away = m.get("away_team_name_en", "TBD")
+                hg = m.get("home_score", 0)
+                ag = m.get("away_score", 0)
+                lines.append(format_match_line(home, away, score=f"{hg}-{ag}"))
+            lines.append("━━━━━━━━━━━━━━")
+        
+        if live_now:
+            lines.append("🔴 **LIVE NOW**")
+            for m in live_now[:3]:
+                home = m.get("home_team_name_en", "TBD")
+                away = m.get("away_team_name_en", "TBD")
+                hg = m.get("home_score", 0)
+                ag = m.get("away_score", 0)
+                minute = m.get("minute", "")
+                lines.append(format_match_line(home, away, score=f"{hg}-{ag}", extra=f" ({minute}')"))
+            lines.append("━━━━━━━━━━━━━━")
+        
         if upcoming:
-            lines.append("⏳ **TODAY'S FIXTURES**")
-            for m in upcoming:
-                lines.append(format_match(m))
-            lines.append("")
-
-        standings = get_standings()
-        if standings:
-            lines.append("🏆 **CURRENT GROUP STANDINGS**")
-            for group in standings[:4]:
-                g_name = group.get("group", group.get("name", "Group"))
-                lines.append(f"**{g_name}**")
-                table = group.get("table", [])[:4]
-                for team in table:
-                    name = team.get("team_name_en", team.get("name", "TBD"))
-                    pts = team.get("points", 0)
-                    lines.append(f"  • {name} — {pts} pts")
-            lines.append("")
+            lines.append("📅 **TODAY'S FIXTURES**")
+            for m in upcoming[:5]:
+                home = m.get("home_team_name_en", "TBD")
+                away = m.get("away_team_name_en", "TBD")
+                # Try to get time from local_date or kickoff
+                time_str = m.get("local_date", "")
+                if " " in time_str:
+                    time_part = time_str.split(" ")[-1]  # rough
+                else:
+                    time_part = ""
+                if time_part:
+                    time_part = utc_to_wat(time_part)
+                lines.append(format_match_line(home, away, time=time_part))
+            lines.append("━━━━━━━━━━━━━━")
         
-        lines.append("⚽ **FIFA World Cup 2026** — Enjoy the games!")
-    
+        # Match to watch: first upcoming
+        if upcoming:
+            m = upcoming[0]
+            home = m.get("home_team_name_en", "TBD")
+            away = m.get("away_team_name_en", "TBD")
+            lines.append("⭐ **MATCH TO WATCH**")
+            lines.append(format_match_line(home, away))
+            lines.append("")
+            lines.append(f"A victory would move {home} closer to the Round of 16 while {away} look to pull off an upset.")
+            lines.append("━━━━━━━━━━━━━━")
+        
+        lines.append("🏆 **FIFA WORLD CUP 2026**")
+        lines.append("📲 @wcupdates2026")
+        return "\n".join(lines)
+
+    # Fallback to RSS
+    logger.info("API returned no matches, falling back to RSS")
+    data = build_from_rss()
+    results = data.get("results", [])
+    live = data.get("live", [])
+    upcoming = data.get("upcoming", [])
+
+    if results or live or upcoming:
+        if results:
+            lines.append("🏁 **RESULTS**")
+            for r in results[:5]:
+                lines.append(format_match_line(r["home"], r["away"], score=r["score"]))
+            lines.append("━━━━━━━━━━━━━━")
+        if live:
+            lines.append("🔴 **LIVE NOW**")
+            for l in live[:3]:
+                lines.append(format_match_line(l["home"], l["away"], extra=" (LIVE)"))
+            lines.append("━━━━━━━━━━━━━━")
+        if upcoming:
+            lines.append("📅 **TODAY'S FIXTURES**")
+            for u in upcoming[:5]:
+                time_part = u["time"] if u["time"] else ""
+                if time_part:
+                    time_part = utc_to_wat(time_part)
+                lines.append(format_match_line(u["home"], u["away"], time=time_part))
+            lines.append("━━━━━━━━━━━━━━")
+        if upcoming:
+            u = upcoming[0]
+            lines.append("⭐ **MATCH TO WATCH**")
+            lines.append(format_match_line(u["home"], u["away"]))
+            lines.append("")
+            lines.append(f"A victory would move {u['home']} closer to the Round of 16 while {u['away']} look to pull off an upset.")
+            lines.append("━━━━━━━━━━━━━━")
+        
+        lines.append("⚽ *Data sourced from BBC, Sky, and Guardian RSS feeds.*")
     else:
-        # Fallback to RSS
-        logger.info("API returned no matches, falling back to RSS")
-        results, live, upcoming = build_from_rss()
-        
-        if results or live or upcoming:
-            if results:
-                lines.append("🏁 **RESULTS**")
-                for r in results[:5]:
-                    lines.append(r)
-                lines.append("")
-            if live:
-                lines.append("🔴 **LIVE MATCHES**")
-                for l in live[:3]:
-                    lines.append(l)
-                lines.append("")
-            if upcoming:
-                lines.append("⏳ **UPCOMING FIXTURES**")
-                for u in upcoming[:5]:
-                    lines.append(u)
-                lines.append("")
-            lines.append("⚽ *Data sourced from BBC, Sky, and Guardian RSS feeds.*")
-        else:
-            lines.append("No matches scheduled for today.")
-            lines.append("")
-            lines.append("📅 **UPCOMING WORLD CUP FIXTURES:**")
-            lines.append("• June 19: Group A & B matches")
-            lines.append("• June 20: Group C & D matches")
-            lines.append("• June 21: Group E & F matches")
-            lines.append("• June 22: Group G & H matches")
+        lines.append("No matches scheduled for today.")
+        lines.append("")
+        lines.append("📅 **UPCOMING WORLD CUP FIXTURES:**")
+        lines.append("• June 19: Group A & B matches")
+        lines.append("• June 20: Group C & D matches")
+        lines.append("• June 21: Group E & F matches")
+        lines.append("• June 22: Group G & H matches")
+        lines.append("━━━━━━━━━━━━━━")
 
-    lines.append("\n📲 @wcupdates2026")
+    lines.append("🏆 **FIFA WORLD CUP 2026**")
+    lines.append("📲 @wcupdates2026")
     return "\n".join(lines)
 
 # ---------- SEND ----------
