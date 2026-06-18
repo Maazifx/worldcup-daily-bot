@@ -2,7 +2,8 @@ name: World Cup News
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    # Run every 30 minutes to counteract GitHub Actions scheduling queues
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 concurrency:
@@ -25,7 +26,9 @@ jobs:
           python-version: '3.10'
 
       - name: Install Dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Run World Cup Updates
         env:
@@ -39,18 +42,18 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
 
-          # Ensure the file exists
+          # Ensure history tracking infrastructure exists
           if [ ! -f worldcup_posted_articles.json ]; then
             echo "[]" > worldcup_posted_articles.json
           fi
 
           git add worldcup_posted_articles.json
 
-          # Only commit if there are changes
+          # Only push changes back to the repository if new items were captured
           if ! git diff --staged --quiet; then
-            git commit -m "Update World Cup history"
+            git commit -m "Update World Cup history tracking files [skip ci]"
             git pull --rebase origin main || true
             git push origin HEAD:main || true
           else
-            echo "No changes to commit."
+            echo "No history modifications encountered. Ending session clean."
           fi
