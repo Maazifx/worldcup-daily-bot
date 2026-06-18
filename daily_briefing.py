@@ -1,5 +1,7 @@
 import os
 import requests
+import feedparser
+import re
 import datetime
 import logging
 import sys
@@ -15,137 +17,118 @@ if not BOT_TOKEN or not CHAT_ID:
     sys.exit(1)
 
 STATE_FILE = "daily_briefing_state.txt"
-FOTMOB_BASE = "https://www.fotmob.com/api"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-def utc_to_wat(utc_time_str):
-    try:
-        hour, minute = map(int, utc_time_str.split(":"))
-        hour += 1
-        if hour >= 24:
-            hour -= 24
-        return f"{hour:02d}:{minute:02d} WAT"
-    except:
-        return utc_time_str
+# RSS feeds – same as your news bot
+FEEDS = {
+    "BBC Sport": "https://feeds.bbci.co.uk/sport/football/rss.xml",
+    "Sky Sports": "https://www.skysports.com/rss/12040",
+    "Guardian": "https://www.theguardian.com/football/rss",
+    "90Min": "https://www.90min.com/posts.rss"
+}
 
-def discover_league_id():
+def fetch_articles_from_feed(url):
     try:
-        resp = requests.get(f"{FOTMOB_BASE}/leagues", headers=HEADERS, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            for league in data:
-                name = league.get("name", "")
-                if "World Cup" in name or "FIFA" in name:
-                    logger.info(f"Found league: {name} (ID: {league['id']})")
-                    return league["id"]
+        feed = feedparser.parse(url, request_headers={"User-Agent": "Mozilla/5.0"})
+        return feed.entries[:30]
     except Exception as e:
-        logger.error(f"League discovery failed: {e}")
-    return 42
-
-WC_LEAGUE_ID = discover_league_id()
-logger.info(f"Using league ID: {WC_LEAGUE_ID}")
-
-def fetch_matches_by_date(date_str):
-    url = f"{FOTMOB_BASE}/matches"
-    params = {"date": date_str}
-    try:
-        resp = requests.get(url, headers=HEADERS, params=params, timeout=15)
-        if resp.status_code == 200:
-            data = resp.json()
-            if isinstance(data, list):
-                matches = data
-            elif isinstance(data, dict) and "matches" in data:
-                matches = data["matches"]
-            else:
-                matches = []
-            filtered = [m for m in matches if m.get("league", {}).get("id") == WC_LEAGUE_ID]
-            return filtered
-        else:
-            logger.error(f"Fotmob error: {resp.status_code}")
-            return []
-    except Exception as e:
-        logger.error(f"Request failed: {e}")
+        logger.error(f"Failed to fetch {url}: {e}")
         return []
 
-def format_match(m):
-    home = m["home"]["name"]
-    away = m["away"]["name"]
-    status = m.get("status", {})
-    time_info = m.get("time", {})
-    if status.get("finished", False):
-        hg = m["home"]["score"]
-        ag = m["away"]["score"]
-        return f"{home} {hg}-{ag} {away}"
-    elif status.get("live", False):
-        hg = m["home"]["score"]
-        ag = m["away"]["score"]
-        minute = status.get("minute", "LIVE")
-        return f"{home} {hg}-{ag} {away} ({minute}')"
-    else:
-        utc_time = time_info.get("utcTime", "").split("T")[1][:5]
-        wat_time = utc_to_wat(utc_time)
-        return f"{home} vs {away} – {wat_time}"
+def extract_match_info(text):
+    """Try to extract team names and scores from text."""
+    # Patterns: "Team A 2-1 Team B", "Team A 2:1 Team B", "Team A vs Team B"
+    patterns = [
+        r'([A-Za-z ]+)\s+(\d+)\s*[-–:;]\s*(\d+)\s+([A-Za-z ]+)',  # score
+        r'([A-Za-z ]+)\s+v(?:s)?\.?\s+([A-Za-z ]+)',  # vs
+        r'([A-Za-z ]+)\s+[-–]\s+([A-Za-z ]+)',  # dash
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            groups = m.groups()
+            if len(groups) == 4:
+                home, hg, ag, away = groups
+                return (home.strip(), away.strip(), f"{hg}-{ag}")
+            elif len(groups) == 2:
+                return (groups[0].strip(), groups[1].strip(), None)
+    return (None, None, None)
 
-def get_match_timestamp(m):
-    time_info = m.get("time", {})
-    utc_time = time_info.get("utcTime", "")
-    if utc_time:
-        try:
-            dt = datetime.datetime.fromisoformat(utc_time.replace("Z", "+00:00"))
-            return dt.timestamp()
-        except:
-            pass
-    return 0
+def is_result(text):
+    return any(kw in text.lower() for kw in ["full-time", "result", "final", "wins", "beat", "defeat"])
+
+def is_live(text):
+    return any(kw in text.lower() for kw in ["live", "minute", "half-time", "updates"])
+
+def is_preview(text):
+    return any(kw in text.lower() for kw in ["preview", "ahead of", "set to face", "clash"])
 
 def build_briefing():
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r") as f:
-            last_run = f.read().strip()
-        if last_run == today:
-            logger.info("Briefing already sent today – skipping.")
-            return None
+            if f.read().strip() == today:
+                logger.info("Briefing already sent today – skipping.")
+                return None
 
-    matches = fetch_matches_by_date(today)
-    if not matches:
-        tomorrow = (datetime.datetime.utcnow() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-        matches = fetch_matches_by_date(tomorrow)
-        if not matches:
-            return "No World Cup matches today or tomorrow."
+    all_articles = []
+    for source, url in FEEDS.items():
+        entries = fetch_articles_from_feed(url)
+        for entry in entries:
+            title = getattr(entry, "title", "").strip()
+            summary = getattr(entry, "summary", "").strip()
+            summary = re.sub("<.*?>", "", summary)
+            if title:
+                all_articles.append({
+                    "source": source,
+                    "title": title,
+                    "summary": summary,
+                    "link": getattr(entry, "link", "")
+                })
 
-    results = [m for m in matches if m.get("status", {}).get("finished", False)]
-    live = [m for m in matches if m.get("status", {}).get("live", False)]
-    upcoming = [m for m in matches if not m.get("status", {}).get("finished", False) and not m.get("status", {}).get("live", False)]
-    upcoming.sort(key=get_match_timestamp)
+    if not all_articles:
+        return "No football news found today."
+
+    results = []
+    live = []
+    upcoming = []
+
+    for article in all_articles:
+        text = article["title"] + " " + article["summary"]
+        home, away, score = extract_match_info(text)
+        if not home or not away:
+            continue
+        if is_result(text) and score:
+            results.append(f"{home} {score} {away}")
+        elif is_live(text):
+            live.append(f"{home} vs {away} (LIVE)")
+        elif is_preview(text):
+            upcoming.append(f"{home} vs {away}")
+
+    # If we got nothing, fallback to raw headlines that mention matches
+    if not results and not live and not upcoming:
+        for article in all_articles:
+            text = article["title"]
+            if " vs " in text or " v " in text or "–" in text:
+                upcoming.append(text)
 
     lines = []
     if results:
         lines.append("🏁 RESULTS")
-        for m in results[:5]:
-            lines.append(format_match(m))
+        lines.extend(results[:5])
         lines.append("")
     if live:
         lines.append("🔴 LIVE")
-        for m in live[:3]:
-            lines.append(format_match(m))
+        lines.extend(live[:3])
         lines.append("")
     if upcoming:
         lines.append("🔥 NEXT MATCH")
-        lines.append(format_match(upcoming[0]))
+        lines.append(upcoming[0])
     else:
-        lines.append("🔥 No upcoming matches today.")
-    if results:
-        first = results[0]
-        home = first["home"]["name"]
-        away = first["away"]["name"]
-        hg = first["home"]["score"]
-        ag = first["away"]["score"]
-        if hg > ag:
-            lines.append(f"\n📝 {home} opened their campaign with a {hg}-{ag} win over {away}.")
-        elif hg < ag:
-            lines.append(f"\n📝 {away} defeated {home} {ag}-{hg} in today's match.")
-        else:
-            lines.append(f"\n📝 {home} and {away} shared the points in a {hg}-{ag} draw.")
+        lines.append("🔥 No upcoming matches found.")
+
+    if not lines or len(lines) == 1:
+        return "No match information available today."
+
     lines.append("\n🏆 FIFA WORLD CUP 2026")
     lines.append("📲 @wcupdates2026")
     return "\n".join(lines)
@@ -154,27 +137,20 @@ def send_briefing():
     try:
         text = build_briefing()
         if text is None:
-            logger.info("Skipped – already sent today.")
             return
         if not text:
-            logger.warning("No text to send.")
             return
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": CHAT_ID,
-            "text": text,
-            "disable_web_page_preview": True
-        }
+        payload = {"chat_id": CHAT_ID, "text": text, "disable_web_page_preview": True}
         resp = requests.post(url, json=payload)
         if resp.status_code == 200:
             logger.info("Briefing sent.")
-            today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
             with open(STATE_FILE, "w") as f:
-                f.write(today)
+                f.write(datetime.datetime.utcnow().strftime("%Y-%m-%d"))
         else:
-            logger.error(f"Failed to send: {resp.text}")
+            logger.error(f"Failed: {resp.text}")
     except Exception as e:
-        logger.error(f"Error sending: {e}")
+        logger.error(f"Error: {e}")
 
 if __name__ == "__main__":
     send_briefing()
