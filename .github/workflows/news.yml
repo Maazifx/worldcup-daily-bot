@@ -27,38 +27,8 @@ jobs:
       - name: Install Dependencies
         run: pip install -r requirements.txt
 
-      # Debug step – confirms secret exists
-      - name: Debug secret existence
-        run: |
-          if [ -n "$FOOTBALL_DATA_KEY" ]; then
-            echo "✅ FOOTBALL_DATA_KEY is set (length: ${#FOOTBALL_DATA_KEY})"
-          elif [ -n "$FOOTBALLDATAKEY" ]; then
-            echo "✅ FOOTBALLDATAKEY is set (length: ${#FOOTBALLDATAKEY})"
-          else
-            echo "❌ Neither secret is set"
-          fi
-        env:
-          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
-          FOOTBALLDATAKEY: ${{ secrets.FOOTBALLDATAKEY }}
-
       - name: Run Daily Briefing
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
-          FOOTBALLDATAKEY: ${{ secrets.FOOTBALLDATAKEY }}
         run: python daily_briefing.py
-
-      - name: Save Briefing State
-        continue-on-error: true
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-
-          git add daily_briefing_state.txt
-
-          if ! git diff --staged --quiet; then
-            git commit -m "Update briefing state"
-            git pull --rebase origin main || true
-            git push origin HEAD:main || true
-          fi
